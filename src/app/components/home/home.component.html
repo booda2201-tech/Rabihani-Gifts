@@ -1,0 +1,27 @@
+<div class="home-container">
+  <div class="tabs-wrapper">
+    <div class="container">
+      <div class="row g-3 justify-content-center">
+
+        <div class="col-4 col-md-3">
+          <div class="nav-tab" routerLink="qr-scanner" routerLinkActive="active">
+            <i class="bi bi-qr-code-scan"></i>
+            <span>نظام الـ QR</span>
+          </div>
+        </div>
+
+        <div class="col-4 col-md-3">
+          <div class="nav-tab" routerLink="gifts" routerLinkActive="active">
+            <i class="bi bi-gift-fill"></i>
+            <span>نظام الهدايا</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="content-area">
+    <router-outlet></router-outlet>
+  </div>
+</div>

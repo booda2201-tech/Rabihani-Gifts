@@ -1,0 +1,39 @@
+<section id="login-section">
+  <div class="main-card">
+    <div class="login-logo">
+      <i class="bi bi-shield-lock-fill"></i>
+    </div>
+
+    <h2>Al Hendal Group</h2>
+    <p class="subtitle">يرجى تسجيل الدخول للوصول للنظام المتكامل</p>
+
+    <form (ngSubmit)="onLogin()">
+      <div class="input-group">
+        <i class="bi bi-person-fill"></i>
+        <input
+          type="text"
+          name="username"
+          [(ngModel)]="loginData.emailOrPhone"
+          placeholder="البريد أو الهاتف"
+          required>
+      </div>
+
+      <div class="input-group">
+        <i class="bi bi-lock-fill"></i>
+        <input
+          type="password"
+          name="password"
+          [(ngModel)]="loginData.password"
+          placeholder="كلمة المرور"
+          required>
+      </div>
+
+      <button type="submit" [disabled]="isLoggingIn" class="btn-blue">
+        <span *ngIf="!isLoggingIn">دخول للنظام <i class="bi bi-box-arrow-in-left"></i></span>
+        <span *ngIf="isLoggingIn" class="spinner-border spinner-border-sm"></span>
+      </button>
+    </form>
+
+    <p class="copyright">جميع الحقوق محفوظة لمجموعة الهندال © 2026</p>
+  </div>
+</section>

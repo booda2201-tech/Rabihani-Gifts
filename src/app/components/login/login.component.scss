@@ -1,0 +1,105 @@
+#login-section {
+  background-color: #0b0f19; // لون الخلفية الداكن جداً
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  direction: rtl; // لضبط الاتجاه للعربي
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+
+  .main-card {
+    background-color: #151b2b; // لون الكارد الداكن
+    width: 100%;
+    max-width: 400px;
+    padding: 40px 30px;
+    border-radius: 20px;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+    text-align: center;
+    color: white;
+
+    .login-logo {
+      font-size: 60px;
+      color: #3b82f6; // اللون الأزرق للأيقونة
+      margin-bottom: 15px;
+      filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.3));
+    }
+
+    h2 {
+      font-size: 24px;
+      margin-bottom: 8px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      font-size: 13px;
+      margin-bottom: 35px;
+    }
+
+    .input-group {
+      position: relative;
+      margin-bottom: 20px;
+
+      input {
+        width: 100%;
+        padding: 14px 45px 14px 15px; // مساحة للأيقونة على اليمين
+        background-color: #0b0f19;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        color: white;
+        font-size: 14px;
+        outline: none;
+        transition: all 0.3s ease;
+
+        &::placeholder {
+          color: #475569;
+        }
+
+        &:focus {
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        }
+      }
+
+      i {
+        position: absolute;
+        right: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #3b82f6;
+        font-size: 18px;
+      }
+    }
+
+    .btn-blue {
+      width: 100%;
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      transition: all 0.3s ease;
+      margin-top: 10px;
+
+      &:hover {
+        background-color: #1d4ed8;
+        transform: translateY(-1px);
+        box-shadow: 0 5px 15px rgba(37, 99, 235, 0.4);
+      }
+    }
+
+    .copyright {
+      margin-top: 35px;
+      font-size: 11px;
+      color: #475569;
+    }
+  }
+}

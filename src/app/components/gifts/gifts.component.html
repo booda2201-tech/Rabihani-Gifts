@@ -1,0 +1,47 @@
+<div class="container-fluid gift-page">
+  <div class="gift-card">
+    <div class="top-icon">
+      <i class="bi bi-gift-fill"></i>
+    </div>
+
+    <h1>قائمة الهدايا</h1>
+    <p class="subtitle">سجل بياناتك للحصول على هديتك الآن</p>
+
+    <div class="form-section">
+      <form (ngSubmit)="submitGift()">
+        <div class="input-group-custom">
+          <input
+            type="tel"
+            name="phone"
+            [(ngModel)]="giftForm.phone"
+            placeholder="رقم الهاتف"
+            required
+          />
+        </div>
+
+        <div class="input-group-custom">
+          <input
+            type="text"
+            name="code"
+            [(ngModel)]="giftForm.code"
+            placeholder="كود الهدية"
+            required
+          />
+        </div>
+
+        <button type="submit" class="submit-btn" [disabled]="isLoading">
+          <span *ngIf="!isLoading">إرسال البيانات <i class="bi bi-arrow-left"></i></span>
+          <span *ngIf="isLoading" class="spinner-border spinner-border-sm"></span>
+        </button>
+      </form>
+
+      <div *ngIf="isSuccess" class="success-message d-flex">
+        <i class="bi bi-check-circle-fill"></i> {{ statusMessage }}
+      </div>
+
+      <div *ngIf="isError" class="error-message d-flex">
+        <i class="bi bi-x-circle-fill"></i> {{ statusMessage }}
+      </div>
+    </div>
+  </div>
+</div>

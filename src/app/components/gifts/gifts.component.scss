@@ -1,0 +1,110 @@
+.gift-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 80vh;
+  direction: rtl;
+
+  .gift-card {
+    background-color: #151b2b;
+    width: 100%;
+    max-width: 400px;
+    padding: 40px 30px;
+    border-radius: 20px;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+    text-align: center;
+
+    .top-icon {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto 20px;
+      background: rgba(59, 130, 246, 0.1);
+      border-radius: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #3b82f6;
+      font-size: 28px; // مقاس أيقونة الهدية
+      box-shadow: 0 0 20px rgba(59, 130, 246, 0.2);
+
+      i {
+        display: flex; // لضمان التوسط الدقيق
+      }
+    }
+
+    h1 {
+      color: #ffffff;
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-bottom: 30px;
+    }
+
+    .input-group-custom {
+      margin-bottom: 20px;
+
+      input {
+        width: 100%;
+        padding: 14px 15px;
+        background-color: #0b0f19;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        color: #ffffff;
+        font-size: 14px;
+        outline: none;
+        text-align: right;
+        transition: all 0.3s ease;
+
+        &:focus {
+          border-color: #3b82f6;
+        }
+      }
+    }
+
+    .submit-btn {
+      width: 100%;
+      background: linear-gradient(90deg, #3b82f6, #2563eb);
+      color: #ffffff;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+
+      i {
+        font-size: 1.2rem; // مقاس السهم
+      }
+
+      &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(37, 99, 235, 0.4);
+      }
+    }
+
+    .success-message, .error-message {
+      display: none;
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .success-message { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+    .error-message { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+  }
+}

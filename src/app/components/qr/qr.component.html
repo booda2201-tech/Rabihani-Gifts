@@ -1,0 +1,55 @@
+<div class="container-fluid qr-page">
+  <div class="qr-card">
+    <div class="top-icon">
+      <i class="bi bi-qr-code-scan"></i>
+    </div>
+
+    <h1>مسح كود QR</h1>
+    <p class="subtitle">خاص بإضافة النقاط وتتبع العمليات</p>
+
+    <div class="scanner-section">
+      <div class="video-wrapper" [style.display]="isScanning ? 'block' : 'none'">
+        <video #video playsinline class="qr-video"></video>
+        <div class="scanner-overlay"></div> </div>
+
+      <div class="placeholder-box" *ngIf="!isScanning">
+        <i class="bi bi-camera-video-off"></i>
+        <span>الكاميرا مغلقة</span>
+      </div>
+
+      <button *ngIf="!isScanning" (click)="startScanning()" class="submit-btn mt-3">
+        <i class="bi bi-camera-fill"></i> تشغيل الكاميرا للمسح
+      </button>
+    </div>
+
+    <div *ngIf="showModal" class="custom-modal-overlay">
+      <div class="custom-modal-card">
+        <div class="modal-header-custom">
+          <i class="bi bi-plus-circle-fill"></i>
+          <h5>إضافة نقاط للكود</h5>
+          <small>{{ currentCode }}</small>
+        </div>
+
+        <div class="modal-body-custom">
+          <div class="input-group-custom">
+            <label>عدد النقاط</label>
+            <input
+              type="number"
+              [(ngModel)]="pointsToAdd"
+              placeholder="أدخل النقاط هنا..."
+            />
+          </div>
+        </div>
+
+        <div class="modal-footer-custom">
+          <button class="btn-confirm" (click)="sendPoints()">
+            <i class="bi bi-check2-all"></i> تأكيد الإضافة
+          </button>
+          <button class="btn-cancel" (click)="showModal = false">
+            <i class="bi bi-x-lg"></i> إلغاء
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
