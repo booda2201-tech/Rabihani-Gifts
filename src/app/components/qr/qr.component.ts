@@ -90,20 +90,79 @@ stopCamera() {
 
 
   // 3. الوظيفة اللي بتبعت النقاط (غيرت اسمها لـ sendPoints عشان تطابق الـ HTML)
-  sendPoints() {
-    if (this.pointsToAdd && this.pointsToAdd > 0) {
-      this.apiService.scanQr(this.currentCode, this.pointsToAdd).subscribe({
-        next: (res) => {
+  // sendPoints() {
+  //   if (this.pointsToAdd && this.pointsToAdd > 0) {
+  //     this.apiService.scanQr(this.currentCode, this.pointsToAdd).subscribe({
+  //       next: (res) => {
+  //         this.showModal = false;
+  //         Swal.fire('نجاح', 'تم إضافة النقاط بنجاح ✅', 'success');
+  //         this.pointsToAdd = null;
+  //       },
+  //       error: (err) => {
+  //         Swal.fire('خطأ', 'فشلت عملية إضافة النقاط ❌', 'error');
+  //       }
+  //     });
+  //   } else {
+  //     Swal.fire('تنبيه', 'يرجى إدخال عدد نقاط صحيح', 'warning');
+  //   }
+  // }
+
+
+
+
+
+sendPoints() {
+  if (this.pointsToAdd && this.pointsToAdd > 0) {
+    // 1. إظهار Loading عشان المستخدم يعرف إن العملية جارية
+    Swal.fire({
+      title: 'جاري حفظ النقاط...',
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading();
+      }
+    });
+
+    this.apiService.scanQr(this.currentCode, this.pointsToAdd).subscribe({
+      next: (res) => {
+        Swal.close();
+
+        // 2. التحقق من قيمة success الحقيقية اللي جاية من السيرفر
+        if (res && res.success === true) {
+          // نجاح حقيقي
           this.showModal = false;
-          Swal.fire('نجاح', 'تم إضافة النقاط بنجاح ✅', 'success');
-          this.pointsToAdd = null;
-        },
-        error: (err) => {
-          Swal.fire('خطأ', 'فشلت عملية إضافة النقاط ❌', 'error');
+          Swal.fire({
+            title: 'نجاح',
+            text: res.message || `تم إضافة ${this.pointsToAdd} نقطة بنجاح ✅`,
+            icon: 'success'
+          });
+          this.pointsToAdd = null; // تصفير النقاط بعد النجاح
+        } else {
+          // السيرفر رد بـ success: false (زي حالة الكود غير صحيح)
+          Swal.fire({
+            title: 'فشل الإضافة',
+            text: res.message || 'عفواً، هذا الكود غير صالح أو تم استخدامه ❌',
+            icon: 'error'
+          });
         }
-      });
-    } else {
-      Swal.fire('تنبيه', 'يرجى إدخال عدد نقاط صحيح', 'warning');
-    }
+      },
+      error: (err) => {
+        Swal.close();
+        // 3. حالة وجود خطأ في الاتصال بالسيرفر (مثلاً 500 Internal Server Error)
+        console.error("API Error:", err);
+        Swal.fire({
+          title: 'خطأ في الاتصال',
+          text: err.error?.message || 'حدث خطأ غير متوقع، يرجى المحاولة لاحقاً ❌',
+          icon: 'error'
+        });
+      }
+    });
+  } else {
+    Swal.fire('تنبيه', 'يرجى إدخال عدد نقاط أكبر من الصفر', 'warning');
   }
+}
+
+
+
+
+
 }
