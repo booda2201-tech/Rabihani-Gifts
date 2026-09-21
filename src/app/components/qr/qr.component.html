@@ -1,118 +1,89 @@
 <div class="container-fluid qr-page">
   <div class="qr-card">
     <div class="top-icon">
-      <i class="bi bi-qr-code-scan"></i>
+      <i class="bi bi-receipt-cutoff"></i>
     </div>
 
-    <h1>مسح كود QR</h1>
-    <p class="subtitle">خاص بإضافة النقاط وتتبع العمليات</p>
+    <h1>نظام الفواتير</h1>
+    <p class="subtitle">صوّر فاتورة المشتريات لإضافة النقاط تلقائيًا بنسبة 10% من الإجمالي</p>
 
-    <div class="scanner-section">
-      <div class="video-wrapper" [style.display]="isScanning ? 'block' : 'none'">
-        <video #video playsinline class="qr-video"></video>
-        <div class="scanner-overlay"></div>
-      </div>
+    <input
+      #cameraInput
+      type="file"
+      accept="image/*"
+      capture="environment"
+      hidden
+      (change)="onInvoiceSelected($event)"
+    />
 
-      <div class="placeholder-box" *ngIf="!isScanning">
-        <i class="bi bi-camera-video-off"></i>
-        <span>الكاميرا مغلقة</span>
-      </div>
-
-      <button *ngIf="!isScanning" (click)="startScanning()" class="submit-btn mt-3">
-        <i class="bi bi-camera-fill"></i> تشغيل الكاميرا للمسح
+    <div class="invoice-actions" *ngIf="!invoicePreview">
+      <button type="button" class="btn-camera" (click)="openCamera()">
+        <i class="bi bi-camera-fill"></i> تصوير الفاتورة
       </button>
     </div>
 
-    <div *ngIf="showModal" class="custom-modal-overlay">
-      <div class="custom-modal-card">
-        <div class="modal-header-custom">
-          <i class="bi bi-receipt-cutoff"></i>
-          <h5>إضافة نقاط من الفاتورة</h5>
-          <small>{{ currentCode }}</small>
-        </div>
+    <div class="invoice-preview-wrap" *ngIf="invoicePreview">
+      <img [src]="invoicePreview" alt="صورة الفاتورة" />
+      <button type="button" class="btn-retake" (click)="resetInvoice()" [disabled]="isAnalyzing">
+        <i class="bi bi-arrow-repeat"></i> إعادة التصوير
+      </button>
+    </div>
 
-        <div class="modal-body-custom">
-          <p class="invoice-hint">صوّر فاتورة المشتريات بوضوح حتى يظهر الإجمالي، والنقاط هتتحسب 10% من قيمة الفاتورة.</p>
+    <div class="analyze-status" *ngIf="isAnalyzing">
+      <div class="spinner"></div>
+      <span>{{ analyzeStatus }}</span>
+      <small *ngIf="analyzeProgress">{{ analyzeProgress }}%</small>
+    </div>
 
-          <input
-            #cameraInput
-            type="file"
-            accept="image/*"
-            capture="environment"
-            hidden
-            (change)="onInvoiceSelected($event)"
-          />
-          <input
-            #galleryInput
-            type="file"
-            accept="image/*"
-            hidden
-            (change)="onInvoiceSelected($event)"
-          />
+    <div class="analyze-error" *ngIf="analyzeError && !isAnalyzing">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      <span>{{ analyzeError }}</span>
+    </div>
 
-          <div class="invoice-actions" *ngIf="!invoicePreview">
-            <button type="button" class="btn-camera" (click)="openCamera()">
-              <i class="bi bi-camera-fill"></i> تصوير الفاتورة
-            </button>
-            <button type="button" class="btn-gallery" (click)="openGallery()">
-              <i class="bi bi-image"></i> رفع صورة
-            </button>
-          </div>
+    <div class="invoice-result" *ngIf="analysis && !isAnalyzing && !analyzeError">
+      <div class="result-row" *ngIf="analysis.invoiceNumber">
+        <span>رقم الفاتورة</span>
+        <strong>{{ analysis.invoiceNumber }}</strong>
+      </div>
+      <div class="result-row" *ngIf="uploadedAt">
+        <span>تاريخ رفع الصورة</span>
+        <strong>{{ uploadedAt }}</strong>
+      </div>
+      <div class="result-row">
+        <span>إجمالي الفاتورة</span>
+        <strong>{{ analysis.invoiceTotal | number: '1.2-2' }} ج.م</strong>
+      </div>
+      <div
+        class="result-row subtle"
+        *ngIf="analysis.totalAmount && analysis.paid && analysis.totalAmount !== analysis.invoiceTotal"
+      >
+        <span>الإجمالي قبل الخصم</span>
+        <strong>{{ analysis.totalAmount | number: '1.2-2' }} ج.م</strong>
+      </div>
+      <div class="result-row points">
+        <span>النقاط المستحقة (10%)</span>
+        <strong>{{ analysis.points }} نقطة</strong>
+      </div>
 
-          <div class="invoice-preview-wrap" *ngIf="invoicePreview">
-            <img [src]="invoicePreview" alt="صورة الفاتورة" />
-            <button type="button" class="btn-retake" (click)="resetInvoice()" [disabled]="isAnalyzing">
-              <i class="bi bi-arrow-repeat"></i> إعادة التصوير
-            </button>
-          </div>
-
-          <div class="analyze-status" *ngIf="isAnalyzing">
-            <div class="spinner"></div>
-            <span>{{ analyzeStatus }}</span>
-            <small *ngIf="analyzeProgress">{{ analyzeProgress }}%</small>
-          </div>
-
-          <div class="analyze-error" *ngIf="analyzeError && !isAnalyzing">
-            <i class="bi bi-exclamation-triangle-fill"></i>
-            <span>{{ analyzeError }}</span>
-          </div>
-
-          <div class="invoice-result" *ngIf="analysis && !isAnalyzing && !analyzeError">
-            <div class="result-row" *ngIf="analysis.invoiceNumber">
-              <span>رقم الفاتورة</span>
-              <strong>{{ analysis.invoiceNumber }}</strong>
-            </div>
-            <div class="result-row" *ngIf="uploadedAt">
-              <span>تاريخ رفع الصورة</span>
-              <strong>{{ uploadedAt }}</strong>
-            </div>
-            <div class="result-row">
-              <span>إجمالي الفاتورة</span>
-              <strong>{{ analysis.invoiceTotal | number: '1.2-2' }} ج.م</strong>
-            </div>
-            <div
-              class="result-row subtle"
-              *ngIf="analysis.totalAmount && analysis.paid && analysis.totalAmount !== analysis.invoiceTotal"
-            >
-              <span>الإجمالي قبل الخصم</span>
-              <strong>{{ analysis.totalAmount | number: '1.2-2' }} ج.م</strong>
-            </div>
-            <div class="result-row points">
-              <span>النقاط المستحقة (10%)</span>
-              <strong>{{ analysis.points }} نقطة</strong>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-footer-custom">
-          <button class="btn-confirm" (click)="sendPoints()" [disabled]="!canSubmitPoints">
-            <i class="bi bi-check2-all"></i> تأكيد إضافة النقاط
-          </button>
-          <button class="btn-cancel" (click)="closeModal()">
-            <i class="bi bi-x-lg"></i> إلغاء
-          </button>
-        </div>
+      <div class="phone-group">
+        <label>رقم هاتف العميل</label>
+        <input
+          type="tel"
+          [(ngModel)]="customerPhone"
+          name="customerPhone"
+          placeholder="01xxxxxxxxx"
+        />
+        <small>لو الرقم متقرأ من الفاتورة تقدر تعدّله قبل التأكيد</small>
       </div>
     </div>
+
+    <button
+      *ngIf="invoicePreview"
+      class="btn-confirm mt-3"
+      (click)="sendPoints()"
+      [disabled]="!canSubmitPoints"
+    >
+      <i class="bi bi-check2-all"></i> تأكيد إضافة النقاط
+    </button>
   </div>
 </div>

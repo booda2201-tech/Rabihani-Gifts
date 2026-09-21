@@ -43,7 +43,7 @@ export class InvoiceAiService implements OnDestroy {
     const worker = await this.getWorker((message) => {
       if (message.status === 'recognizing text') {
         onProgress?.({
-          status: 'جاري قراءة الفاتورة بالذكاء الاصطناعي...',
+          status: 'جاري قراءة الفاتورة ...',
           progress: Math.round(20 + message.progress * 70)
         });
       } else if (message.status) {

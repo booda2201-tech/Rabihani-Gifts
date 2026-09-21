@@ -20,18 +20,17 @@ export class ApiService {
   }
 
   /**
-   * 2. مسح كود الـ QR وإضافة نقاط للمستخدم
-   * @param publicCode الكود اللي الكاميرا قرأته
-   * @param points عدد النقاط اللي كتبتها في الـ Modal
+   * 2. إضافة نقاط من فاتورة المشتريات
    */
-  scanQr(publicCode: string, points: number): Observable<any> {
-    const url = `${this.baseUrl}/UserQr/scan`;
-    // إرسال البيانات كـ Body Object
-    const body = {
-      publicCode: publicCode,
-      pointsToAdd: points
-    };
-    return this.http.post(url, body);
+  addInvoicePoints(payload: {
+    phoneNumber: string;
+    pointsToAdd: number;
+    invoiceNumber: string;
+    invoiceTotal: number | null;
+    uploadedAt: string;
+  }): Observable<any> {
+    const url = `${this.baseUrl}/UserInvoice/scan`;
+    return this.http.post(url, payload);
   }
 
   /**

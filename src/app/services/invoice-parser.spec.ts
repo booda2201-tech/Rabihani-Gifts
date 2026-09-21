@@ -2,6 +2,7 @@ import { calculateInvoicePoints, parseInvoiceText } from './invoice-parser';
 
 const FORTO_RECEIPT = `
 Invoice No. FO18898120878790 رقم الفاتورة
+Cust. Mobile 01114311146 هاتف العميل
 fotalal Amounto 350.8800 الإجمالي
 Discorint 307.01 الخصم
 Faxax 6.1422 الضريبة
@@ -35,6 +36,7 @@ describe('invoice parser', () => {
     expect(result.invoiceTotal).toBe(50.0122);
     expect(result.points).toBe(5);
     expect(result.invoiceNumber).toBe('FO18898120878790');
+    expect(result.customerPhone).toBe('01114311146');
     expect(result.confidence).toBe('high');
   });
 

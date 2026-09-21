@@ -1,26 +1,16 @@
-import { Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
+import { Component, ElementRef, ViewChild } from '@angular/core';
 import { ApiService } from '../../services/api.service';
 import { InvoiceAiService, type InvoiceAnalysis } from '../../services/invoice-ai.service';
 import { formatDateTimeToSecond, UsedInvoicesService } from '../../services/used-invoices.service';
 import Swal from 'sweetalert2';
-import jsQR from 'jsqr';
 
 @Component({
   selector: 'app-qr',
   templateUrl: './qr.component.html',
   styleUrls: ['./qr.component.scss']
 })
-export class QrComponent implements OnDestroy {
-  @ViewChild('video') videoElement!: ElementRef<HTMLVideoElement>;
-  @ViewChild('canvas', { static: false }) canvasElement!: ElementRef<HTMLCanvasElement>;
+export class QrComponent {
   @ViewChild('cameraInput') cameraInput!: ElementRef<HTMLInputElement>;
-  @ViewChild('galleryInput') galleryInput!: ElementRef<HTMLInputElement>;
-
-  isScanning = false;
-  showModal = false;
-  currentCode = '';
-  stream: MediaStream | null = null;
-  animationId: any;
 
   invoicePreview: string | null = null;
   analysis: InvoiceAnalysis | null = null;
@@ -30,6 +20,7 @@ export class QrComponent implements OnDestroy {
   analyzeError: string | null = null;
   imageAddedAt: string | null = null;
   uploadedAt: string | null = null;
+  customerPhone = '';
 
   constructor(
     private apiService: ApiService,
@@ -41,77 +32,19 @@ export class QrComponent implements OnDestroy {
     return !!this.analysis?.invoiceNumber
       && !!this.analysis.invoiceTotal
       && this.analysis.points > 0
+      && !!this.normalizedPhone
       && !!this.imageAddedAt
       && !!this.uploadedAt
       && !this.isAnalyzing
       && !this.analyzeError;
   }
 
-  async startScanning() {
-    this.isScanning = true;
-    try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      });
-
-      if (this.videoElement) {
-        this.videoElement.nativeElement.srcObject = this.stream;
-        this.videoElement.nativeElement.setAttribute('playsinline', 'true');
-        this.videoElement.nativeElement.play();
-        requestAnimationFrame(() => this.scanLoop());
-      }
-    } catch (err) {
-      this.isScanning = false;
-      Swal.fire('خطأ', 'تعذر الوصول للكاميرا', 'error');
-    }
-  }
-
-  scanLoop() {
-    if (this.videoElement && this.videoElement.nativeElement.readyState === this.videoElement.nativeElement.HAVE_ENOUGH_DATA) {
-      const video = this.videoElement.nativeElement;
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-        if (code) {
-          this.onCodeResult(code.data);
-          return;
-        }
-      }
-    }
-
-    if (this.isScanning) {
-      this.animationId = requestAnimationFrame(() => this.scanLoop());
-    }
-  }
-
-  onCodeResult(result: string) {
-    this.currentCode = result;
-    this.stopCamera();
-    this.isScanning = false;
-    this.resetInvoice();
-    this.showModal = true;
-  }
-
-  stopCamera() {
-    if (this.stream) {
-      this.stream.getTracks().forEach((track) => track.stop());
-    }
-    cancelAnimationFrame(this.animationId);
+  get normalizedPhone(): string {
+    return this.customerPhone.replace(/\s+/g, '').trim();
   }
 
   openCamera() {
     this.cameraInput?.nativeElement.click();
-  }
-
-  openGallery() {
-    this.galleryInput?.nativeElement.click();
   }
 
   async onInvoiceSelected(event: Event) {
@@ -156,6 +89,10 @@ export class QrComponent implements OnDestroy {
         this.analyzeProgress = progress.progress;
       });
 
+      if (this.analysis.customerPhone) {
+        this.customerPhone = this.analysis.customerPhone;
+      }
+
       if (!this.analysis.invoiceNumber) {
         this.analyzeError = 'تعذر قراءة رقم الفاتورة. صوّرها مرة أخرى بوضوح مع ظهور رقم الفاتورة.';
         return;
@@ -188,24 +125,22 @@ export class QrComponent implements OnDestroy {
     this.analyzeError = null;
     this.imageAddedAt = null;
     this.uploadedAt = null;
-  }
-
-  closeModal() {
-    this.showModal = false;
-    this.resetInvoice();
+    this.customerPhone = '';
   }
 
   sendPoints() {
     if (!this.canSubmitPoints || !this.analysis || !this.imageAddedAt || !this.uploadedAt) {
-      Swal.fire('تنبيه', 'صوّر الفاتورة أولاً حتى يتم استخراج النقاط', 'warning');
+      Swal.fire('تنبيه', 'صوّر الفاتورة وأدخل رقم هاتف العميل أولاً', 'warning');
       return;
     }
 
     const analysis = this.analysis;
     const pointsToAdd = analysis.points;
     const invoiceTotal = analysis.invoiceTotal;
+    const invoiceNumber = analysis.invoiceNumber as string;
     const imageAddedAt = this.imageAddedAt;
     const uploadedAt = this.uploadedAt;
+    const phoneNumber = this.normalizedPhone;
 
     Swal.fire({
       title: 'جاري حفظ النقاط...',
@@ -215,20 +150,26 @@ export class QrComponent implements OnDestroy {
       }
     });
 
-    this.apiService.scanQr(this.currentCode, pointsToAdd).subscribe({
+    this.apiService.addInvoicePoints({
+      phoneNumber,
+      pointsToAdd,
+      invoiceNumber,
+      invoiceTotal,
+      uploadedAt
+    }).subscribe({
       next: (res) => {
         Swal.close();
 
         if (res && res.success === true) {
           this.usedInvoices.markUsed({
-            invoiceNumber: analysis.invoiceNumber as string,
+            invoiceNumber,
             imageAddedAt,
             uploadedAt,
             total: invoiceTotal,
             points: pointsToAdd
           });
 
-          this.closeModal();
+          this.resetInvoice();
           Swal.fire({
             title: 'نجاح',
             text: res.message || `تم إضافة ${pointsToAdd} نقطة من فاتورة ${invoiceTotal} ج.م ✅`,
@@ -237,7 +178,7 @@ export class QrComponent implements OnDestroy {
         } else {
           Swal.fire({
             title: 'فشل الإضافة',
-            text: res.message || 'عفواً، هذا الكود غير صالح أو تم استخدامه ❌',
+            text: res.message || 'تعذر إضافة النقاط على هذه الفاتورة ❌',
             icon: 'error'
           });
         }
@@ -252,10 +193,6 @@ export class QrComponent implements OnDestroy {
         });
       }
     });
-  }
-
-  ngOnDestroy(): void {
-    this.stopCamera();
   }
 
   private readFileAsDataUrl(file: File): Promise<string> {

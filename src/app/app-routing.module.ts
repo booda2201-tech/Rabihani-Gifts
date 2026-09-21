@@ -14,9 +14,10 @@ const routes: Routes = [
     component: HomeComponent,
     canActivate: [authGuard], // لو مفعل الجارد
     children: [
-      { path: 'qr-scanner', component: QrComponent },
+      { path: 'invoices', component: QrComponent },
+      { path: 'qr-scanner', redirectTo: 'invoices', pathMatch: 'full' },
       { path: 'gifts', component: GiftsComponent },
-      { path: '', redirectTo: 'qr-scanner', pathMatch: 'full' } // الصفحة الافتراضية
+      { path: '', redirectTo: 'invoices', pathMatch: 'full' }
     ]
   },
   { path: '', redirectTo: '/login', pathMatch: 'full' }

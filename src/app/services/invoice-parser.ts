@@ -8,6 +8,7 @@ export interface InvoiceParseResult {
   paid: number | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
+  customerPhone: string | null;
   invoiceTotal: number | null;
   points: number;
   confidence: 'high' | 'medium' | 'low';
@@ -31,6 +32,8 @@ const MONEY_RE = /(\d{1,7}[.,]\d{2,4})/g;
 const INVOICE_NO_RE = /(?:invoice|nvoice|فاتور)[^\nA-Z0-9]{0,20}([A-Z]{1,4}\d{8,})/i;
 const INVOICE_NO_FALLBACK_RE = /\b([A-Z]{1,3}\d{10,})\b/;
 const INVOICE_DATE_RE = /(\d{1,2}-[A-Za-z]{3,9}-\d{4})/;
+const PHONE_LABELED_RE = /(?:هاتف(?:\s*العميل)?|mobile|cust\.?\s*mobile)[^\d+]{0,24}(\+?0?\d{8,13})/i;
+const PHONE_EGY_RE = /\b(01[0125]\d{8})\b/;
 
 export function calculateInvoicePoints(total: number): number {
   if (!Number.isFinite(total) || total <= 0) {
@@ -82,6 +85,7 @@ export function parseInvoiceText(text: string): InvoiceParseResult {
     ...found,
     invoiceNumber: extractInvoiceNumber(normalized),
     invoiceDate: extractInvoiceDate(normalized),
+    customerPhone: extractCustomerPhone(normalized),
     invoiceTotal,
     points: invoiceTotal == null ? 0 : calculateInvoicePoints(invoiceTotal),
     confidence: matchedFields >= 2 ? 'high' : matchedFields === 1 ? 'medium' : 'low',
@@ -130,4 +134,14 @@ function extractInvoiceNumber(text: string): string | null {
 function extractInvoiceDate(text: string): string | null {
   const match = text.match(INVOICE_DATE_RE);
   return match ? match[1] : null;
+}
+
+function extractCustomerPhone(text: string): string | null {
+  const labeled = text.match(PHONE_LABELED_RE);
+  if (labeled?.[1]) {
+    return labeled[1];
+  }
+
+  const egyptian = text.match(PHONE_EGY_RE);
+  return egyptian ? egyptian[1] : null;
 }
