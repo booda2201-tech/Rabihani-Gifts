@@ -10,7 +10,8 @@
     <div class="scanner-section">
       <div class="video-wrapper" [style.display]="isScanning ? 'block' : 'none'">
         <video #video playsinline class="qr-video"></video>
-        <div class="scanner-overlay"></div> </div>
+        <div class="scanner-overlay"></div>
+      </div>
 
       <div class="placeholder-box" *ngIf="!isScanning">
         <i class="bi bi-camera-video-off"></i>
@@ -25,27 +26,89 @@
     <div *ngIf="showModal" class="custom-modal-overlay">
       <div class="custom-modal-card">
         <div class="modal-header-custom">
-          <i class="bi bi-plus-circle-fill"></i>
-          <h5>إضافة نقاط للكود</h5>
+          <i class="bi bi-receipt-cutoff"></i>
+          <h5>إضافة نقاط من الفاتورة</h5>
           <small>{{ currentCode }}</small>
         </div>
 
         <div class="modal-body-custom">
-          <div class="input-group-custom">
-            <label>عدد النقاط</label>
-            <input
-              type="number"
-              [(ngModel)]="pointsToAdd"
-              placeholder="أدخل النقاط هنا..."
-            />
+          <p class="invoice-hint">صوّر فاتورة المشتريات بوضوح حتى يظهر الإجمالي، والنقاط هتتحسب 10% من قيمة الفاتورة.</p>
+
+          <input
+            #cameraInput
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            (change)="onInvoiceSelected($event)"
+          />
+          <input
+            #galleryInput
+            type="file"
+            accept="image/*"
+            hidden
+            (change)="onInvoiceSelected($event)"
+          />
+
+          <div class="invoice-actions" *ngIf="!invoicePreview">
+            <button type="button" class="btn-camera" (click)="openCamera()">
+              <i class="bi bi-camera-fill"></i> تصوير الفاتورة
+            </button>
+            <button type="button" class="btn-gallery" (click)="openGallery()">
+              <i class="bi bi-image"></i> رفع صورة
+            </button>
+          </div>
+
+          <div class="invoice-preview-wrap" *ngIf="invoicePreview">
+            <img [src]="invoicePreview" alt="صورة الفاتورة" />
+            <button type="button" class="btn-retake" (click)="resetInvoice()" [disabled]="isAnalyzing">
+              <i class="bi bi-arrow-repeat"></i> إعادة التصوير
+            </button>
+          </div>
+
+          <div class="analyze-status" *ngIf="isAnalyzing">
+            <div class="spinner"></div>
+            <span>{{ analyzeStatus }}</span>
+            <small *ngIf="analyzeProgress">{{ analyzeProgress }}%</small>
+          </div>
+
+          <div class="analyze-error" *ngIf="analyzeError && !isAnalyzing">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <span>{{ analyzeError }}</span>
+          </div>
+
+          <div class="invoice-result" *ngIf="analysis && !isAnalyzing && !analyzeError">
+            <div class="result-row" *ngIf="analysis.invoiceNumber">
+              <span>رقم الفاتورة</span>
+              <strong>{{ analysis.invoiceNumber }}</strong>
+            </div>
+            <div class="result-row" *ngIf="uploadedAt">
+              <span>تاريخ رفع الصورة</span>
+              <strong>{{ uploadedAt }}</strong>
+            </div>
+            <div class="result-row">
+              <span>إجمالي الفاتورة</span>
+              <strong>{{ analysis.invoiceTotal | number: '1.2-2' }} ج.م</strong>
+            </div>
+            <div
+              class="result-row subtle"
+              *ngIf="analysis.totalAmount && analysis.paid && analysis.totalAmount !== analysis.invoiceTotal"
+            >
+              <span>الإجمالي قبل الخصم</span>
+              <strong>{{ analysis.totalAmount | number: '1.2-2' }} ج.م</strong>
+            </div>
+            <div class="result-row points">
+              <span>النقاط المستحقة (10%)</span>
+              <strong>{{ analysis.points }} نقطة</strong>
+            </div>
           </div>
         </div>
 
         <div class="modal-footer-custom">
-          <button class="btn-confirm" (click)="sendPoints()">
-            <i class="bi bi-check2-all"></i> تأكيد الإضافة
+          <button class="btn-confirm" (click)="sendPoints()" [disabled]="!canSubmitPoints">
+            <i class="bi bi-check2-all"></i> تأكيد إضافة النقاط
           </button>
-          <button class="btn-cancel" (click)="showModal = false">
+          <button class="btn-cancel" (click)="closeModal()">
             <i class="bi bi-x-lg"></i> إلغاء
           </button>
         </div>

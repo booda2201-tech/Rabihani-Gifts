@@ -1,5 +1,7 @@
-import { Component, ViewChild, ElementRef } from '@angular/core';
+import { Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { ApiService } from '../../services/api.service';
+import { InvoiceAiService, type InvoiceAnalysis } from '../../services/invoice-ai.service';
+import { formatDateTimeToSecond, UsedInvoicesService } from '../../services/used-invoices.service';
 import Swal from 'sweetalert2';
 import jsQR from 'jsqr';
 
@@ -8,22 +10,44 @@ import jsQR from 'jsqr';
   templateUrl: './qr.component.html',
   styleUrls: ['./qr.component.scss']
 })
-export class QrComponent {
+export class QrComponent implements OnDestroy {
   @ViewChild('video') videoElement!: ElementRef<HTMLVideoElement>;
   @ViewChild('canvas', { static: false }) canvasElement!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('cameraInput') cameraInput!: ElementRef<HTMLInputElement>;
+  @ViewChild('galleryInput') galleryInput!: ElementRef<HTMLInputElement>;
 
-
-isScanning = false;
+  isScanning = false;
   showModal = false;
   currentCode = '';
-  pointsToAdd: number | null = null;
   stream: MediaStream | null = null;
   animationId: any;
 
-  constructor(private apiService: ApiService) {}
+  invoicePreview: string | null = null;
+  analysis: InvoiceAnalysis | null = null;
+  isAnalyzing = false;
+  analyzeStatus = '';
+  analyzeProgress = 0;
+  analyzeError: string | null = null;
+  imageAddedAt: string | null = null;
+  uploadedAt: string | null = null;
 
-  // 1. الوظيفة اللي بتشغل الكاميرا (كانت ناقصة في الكود اللي فات)
-async startScanning() {
+  constructor(
+    private apiService: ApiService,
+    private invoiceAi: InvoiceAiService,
+    private usedInvoices: UsedInvoicesService
+  ) {}
+
+  get canSubmitPoints(): boolean {
+    return !!this.analysis?.invoiceNumber
+      && !!this.analysis.invoiceTotal
+      && this.analysis.points > 0
+      && !!this.imageAddedAt
+      && !!this.uploadedAt
+      && !this.isAnalyzing
+      && !this.analyzeError;
+  }
+
+  async startScanning() {
     this.isScanning = true;
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
@@ -34,8 +58,6 @@ async startScanning() {
         this.videoElement.nativeElement.srcObject = this.stream;
         this.videoElement.nativeElement.setAttribute('playsinline', 'true');
         this.videoElement.nativeElement.play();
-
-        // نبدأ عملية الفحص (Scan Loop)
         requestAnimationFrame(() => this.scanLoop());
       }
     } catch (err) {
@@ -47,8 +69,6 @@ async startScanning() {
   scanLoop() {
     if (this.videoElement && this.videoElement.nativeElement.readyState === this.videoElement.nativeElement.HAVE_ENOUGH_DATA) {
       const video = this.videoElement.nativeElement;
-
-      // بنحتاج Canvas وهمي في الذاكرة عشان نحلل الصورة
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -57,13 +77,11 @@ async startScanning() {
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-        // هنا المكتبة بتحاول تلاقي QR Code
         const code = jsQR(imageData.data, imageData.width, imageData.height);
 
         if (code) {
-          this.onCodeResult(code.data); // لو لقت كود، تبعته للـ Function اللي عندك
-          return; // نوقف اللوب
+          this.onCodeResult(code.data);
+          return;
         }
       }
     }
@@ -73,47 +91,122 @@ async startScanning() {
     }
   }
 
-  // 2. الوظيفة اللي بتستلم نتيجة المسح
   onCodeResult(result: string) {
     this.currentCode = result;
-    this.stopCamera(); // نقفل الكاميرا أول ما نلاقي نتيجة
+    this.stopCamera();
     this.isScanning = false;
+    this.resetInvoice();
     this.showModal = true;
   }
 
-stopCamera() {
+  stopCamera() {
     if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
+      this.stream.getTracks().forEach((track) => track.stop());
     }
     cancelAnimationFrame(this.animationId);
   }
 
+  openCamera() {
+    this.cameraInput?.nativeElement.click();
+  }
 
-  // 3. الوظيفة اللي بتبعت النقاط (غيرت اسمها لـ sendPoints عشان تطابق الـ HTML)
-  // sendPoints() {
-  //   if (this.pointsToAdd && this.pointsToAdd > 0) {
-  //     this.apiService.scanQr(this.currentCode, this.pointsToAdd).subscribe({
-  //       next: (res) => {
-  //         this.showModal = false;
-  //         Swal.fire('نجاح', 'تم إضافة النقاط بنجاح ✅', 'success');
-  //         this.pointsToAdd = null;
-  //       },
-  //       error: (err) => {
-  //         Swal.fire('خطأ', 'فشلت عملية إضافة النقاط ❌', 'error');
-  //       }
-  //     });
-  //   } else {
-  //     Swal.fire('تنبيه', 'يرجى إدخال عدد نقاط صحيح', 'warning');
-  //   }
-  // }
+  openGallery() {
+    this.galleryInput?.nativeElement.click();
+  }
 
+  async onInvoiceSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
 
+    if (!file) {
+      return;
+    }
 
+    if (!file.type.startsWith('image/')) {
+      this.analyzeError = 'يرجى اختيار صورة واضحة للفاتورة';
+      return;
+    }
 
+    if (file.size > 15 * 1024 * 1024) {
+      this.analyzeError = 'حجم الصورة كبير جداً. صوّر الفاتورة مرة أخرى.';
+      return;
+    }
 
-sendPoints() {
-  if (this.pointsToAdd && this.pointsToAdd > 0) {
-    // 1. إظهار Loading عشان المستخدم يعرف إن العملية جارية
+    this.imageAddedAt = formatDateTimeToSecond(file.lastModified || Date.now());
+    this.uploadedAt = formatDateTimeToSecond(Date.now());
+    this.invoicePreview = await this.readFileAsDataUrl(file);
+    await this.analyzeInvoice();
+  }
+
+  async analyzeInvoice() {
+    if (!this.invoicePreview) {
+      return;
+    }
+
+    this.isAnalyzing = true;
+    this.analysis = null;
+    this.analyzeError = null;
+    this.analyzeStatus = 'جاري تحليل الفاتورة...';
+    this.analyzeProgress = 0;
+
+    try {
+      this.analysis = await this.invoiceAi.analyzeInvoice(this.invoicePreview, (progress) => {
+        this.analyzeStatus = progress.status;
+        this.analyzeProgress = progress.progress;
+      });
+
+      if (!this.analysis.invoiceNumber) {
+        this.analyzeError = 'تعذر قراءة رقم الفاتورة. صوّرها مرة أخرى بوضوح مع ظهور رقم الفاتورة.';
+        return;
+      }
+
+      if (this.analysis.points <= 0) {
+        this.analyzeError = 'المبلغ المستخرج صغير جداً لإضافة نقاط. تأكد من وضوح الإجمالي.';
+        return;
+      }
+
+      const previous = this.usedInvoices.findDuplicate(this.analysis.invoiceNumber);
+      if (previous) {
+        this.analyzeError =
+          `الفاتورة رقم ${this.analysis.invoiceNumber} اترفعت قبل كده في ${previous.uploadedAt}، ومش هيتضاف عليها نقاط تاني.`;
+      }
+    } catch (error: any) {
+      this.analysis = null;
+      this.analyzeError = error?.message || 'تعذر قراءة الفاتورة. حاول تصويرها مرة أخرى.';
+    } finally {
+      this.isAnalyzing = false;
+    }
+  }
+
+  resetInvoice() {
+    this.invoicePreview = null;
+    this.analysis = null;
+    this.isAnalyzing = false;
+    this.analyzeStatus = '';
+    this.analyzeProgress = 0;
+    this.analyzeError = null;
+    this.imageAddedAt = null;
+    this.uploadedAt = null;
+  }
+
+  closeModal() {
+    this.showModal = false;
+    this.resetInvoice();
+  }
+
+  sendPoints() {
+    if (!this.canSubmitPoints || !this.analysis || !this.imageAddedAt || !this.uploadedAt) {
+      Swal.fire('تنبيه', 'صوّر الفاتورة أولاً حتى يتم استخراج النقاط', 'warning');
+      return;
+    }
+
+    const analysis = this.analysis;
+    const pointsToAdd = analysis.points;
+    const invoiceTotal = analysis.invoiceTotal;
+    const imageAddedAt = this.imageAddedAt;
+    const uploadedAt = this.uploadedAt;
+
     Swal.fire({
       title: 'جاري حفظ النقاط...',
       allowOutsideClick: false,
@@ -122,22 +215,26 @@ sendPoints() {
       }
     });
 
-    this.apiService.scanQr(this.currentCode, this.pointsToAdd).subscribe({
+    this.apiService.scanQr(this.currentCode, pointsToAdd).subscribe({
       next: (res) => {
         Swal.close();
 
-        // 2. التحقق من قيمة success الحقيقية اللي جاية من السيرفر
         if (res && res.success === true) {
-          // نجاح حقيقي
-          this.showModal = false;
+          this.usedInvoices.markUsed({
+            invoiceNumber: analysis.invoiceNumber as string,
+            imageAddedAt,
+            uploadedAt,
+            total: invoiceTotal,
+            points: pointsToAdd
+          });
+
+          this.closeModal();
           Swal.fire({
             title: 'نجاح',
-            text: res.message || `تم إضافة ${this.pointsToAdd} نقطة بنجاح ✅`,
+            text: res.message || `تم إضافة ${pointsToAdd} نقطة من فاتورة ${invoiceTotal} ج.م ✅`,
             icon: 'success'
           });
-          this.pointsToAdd = null; // تصفير النقاط بعد النجاح
         } else {
-          // السيرفر رد بـ success: false (زي حالة الكود غير صحيح)
           Swal.fire({
             title: 'فشل الإضافة',
             text: res.message || 'عفواً، هذا الكود غير صالح أو تم استخدامه ❌',
@@ -147,8 +244,7 @@ sendPoints() {
       },
       error: (err) => {
         Swal.close();
-        // 3. حالة وجود خطأ في الاتصال بالسيرفر (مثلاً 500 Internal Server Error)
-        console.error("API Error:", err);
+        console.error('API Error:', err);
         Swal.fire({
           title: 'خطأ في الاتصال',
           text: err.error?.message || 'حدث خطأ غير متوقع، يرجى المحاولة لاحقاً ❌',
@@ -156,13 +252,18 @@ sendPoints() {
         });
       }
     });
-  } else {
-    Swal.fire('تنبيه', 'يرجى إدخال عدد نقاط أكبر من الصفر', 'warning');
   }
-}
 
+  ngOnDestroy(): void {
+    this.stopCamera();
+  }
 
-
-
-
+  private readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error('تعذر قراءة صورة الفاتورة'));
+      reader.readAsDataURL(file);
+    });
+  }
 }
