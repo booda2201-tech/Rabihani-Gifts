@@ -23,14 +23,20 @@ export class ApiService {
    * 2. إضافة نقاط من فاتورة المشتريات
    */
   addInvoicePoints(payload: {
-    phoneNumber: string;
+    publicCode: string;
     pointsToAdd: number;
     invoiceNumber: string;
     invoiceTotal: number | null;
     uploadedAt: string;
   }): Observable<any> {
-    const url = `${this.baseUrl}/UserInvoice/scan`;
-    return this.http.post(url, payload);
+    const url = `${this.baseUrl}/UserQr/scan`;
+    return this.http.post(url, {
+      publicCode: payload.publicCode,
+      pointsToAdd: payload.pointsToAdd,
+      invoiceNumber: payload.invoiceNumber,
+      invoiceTotal: payload.invoiceTotal,
+      uploadedAt: payload.uploadedAt
+    });
   }
 
   /**

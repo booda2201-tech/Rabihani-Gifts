@@ -1,16 +1,23 @@
-import { Component, ElementRef, ViewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { ApiService } from '../../services/api.service';
 import { InvoiceAiService, type InvoiceAnalysis } from '../../services/invoice-ai.service';
 import { formatDateTimeToSecond, UsedInvoicesService } from '../../services/used-invoices.service';
 import Swal from 'sweetalert2';
+import jsQR from 'jsqr';
 
 @Component({
   selector: 'app-qr',
   templateUrl: './qr.component.html',
   styleUrls: ['./qr.component.scss']
 })
-export class QrComponent {
+export class QrComponent implements OnDestroy {
+  @ViewChild('video') videoElement!: ElementRef<HTMLVideoElement>;
   @ViewChild('cameraInput') cameraInput!: ElementRef<HTMLInputElement>;
+
+  isScanning = false;
+  currentCode = '';
+  stream: MediaStream | null = null;
+  animationId: any;
 
   invoicePreview: string | null = null;
   analysis: InvoiceAnalysis | null = null;
@@ -20,7 +27,6 @@ export class QrComponent {
   analyzeError: string | null = null;
   imageAddedAt: string | null = null;
   uploadedAt: string | null = null;
-  customerPhone = '';
 
   constructor(
     private apiService: ApiService,
@@ -28,19 +34,84 @@ export class QrComponent {
     private usedInvoices: UsedInvoicesService
   ) {}
 
+  get customerScanned(): boolean {
+    return !!this.currentCode;
+  }
+
   get canSubmitPoints(): boolean {
-    return !!this.analysis?.invoiceNumber
+    return this.customerScanned
+      && !!this.analysis?.invoiceNumber
       && !!this.analysis.invoiceTotal
       && this.analysis.points > 0
-      && !!this.normalizedPhone
       && !!this.imageAddedAt
       && !!this.uploadedAt
       && !this.isAnalyzing
       && !this.analyzeError;
   }
 
-  get normalizedPhone(): string {
-    return this.customerPhone.replace(/\s+/g, '').trim();
+  async startScanning() {
+    this.isScanning = true;
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+
+      if (this.videoElement) {
+        this.videoElement.nativeElement.srcObject = this.stream;
+        this.videoElement.nativeElement.setAttribute('playsinline', 'true');
+        this.videoElement.nativeElement.play();
+        requestAnimationFrame(() => this.scanLoop());
+      }
+    } catch (err) {
+      this.isScanning = false;
+      Swal.fire('خطأ', 'تعذر الوصول للكاميرا', 'error');
+    }
+  }
+
+  scanLoop() {
+    if (this.videoElement && this.videoElement.nativeElement.readyState === this.videoElement.nativeElement.HAVE_ENOUGH_DATA) {
+      const video = this.videoElement.nativeElement;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+        if (code) {
+          this.onCodeResult(code.data);
+          return;
+        }
+      }
+    }
+
+    if (this.isScanning) {
+      this.animationId = requestAnimationFrame(() => this.scanLoop());
+    }
+  }
+
+  onCodeResult(result: string) {
+    this.currentCode = result;
+    this.stopCamera();
+    this.isScanning = false;
+    this.resetInvoice();
+  }
+
+  stopCamera() {
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => track.stop());
+      this.stream = null;
+    }
+    cancelAnimationFrame(this.animationId);
+  }
+
+  rescanCustomer() {
+    this.currentCode = '';
+    this.resetInvoice();
+    this.startScanning();
   }
 
   openCamera() {
@@ -89,10 +160,6 @@ export class QrComponent {
         this.analyzeProgress = progress.progress;
       });
 
-      if (this.analysis.customerPhone) {
-        this.customerPhone = this.analysis.customerPhone;
-      }
-
       if (!this.analysis.invoiceNumber) {
         this.analyzeError = 'تعذر قراءة رقم الفاتورة. صوّرها مرة أخرى بوضوح مع ظهور رقم الفاتورة.';
         return;
@@ -125,12 +192,16 @@ export class QrComponent {
     this.analyzeError = null;
     this.imageAddedAt = null;
     this.uploadedAt = null;
-    this.customerPhone = '';
+  }
+
+  resetAll() {
+    this.currentCode = '';
+    this.resetInvoice();
   }
 
   sendPoints() {
     if (!this.canSubmitPoints || !this.analysis || !this.imageAddedAt || !this.uploadedAt) {
-      Swal.fire('تنبيه', 'صوّر الفاتورة وأدخل رقم هاتف العميل أولاً', 'warning');
+      Swal.fire('تنبيه', 'امسح كود العميل وصوّر الفاتورة أولاً', 'warning');
       return;
     }
 
@@ -140,7 +211,7 @@ export class QrComponent {
     const invoiceNumber = analysis.invoiceNumber as string;
     const imageAddedAt = this.imageAddedAt;
     const uploadedAt = this.uploadedAt;
-    const phoneNumber = this.normalizedPhone;
+    const publicCode = this.currentCode;
 
     Swal.fire({
       title: 'جاري حفظ النقاط...',
@@ -151,7 +222,7 @@ export class QrComponent {
     });
 
     this.apiService.addInvoicePoints({
-      phoneNumber,
+      publicCode,
       pointsToAdd,
       invoiceNumber,
       invoiceTotal,
@@ -169,7 +240,7 @@ export class QrComponent {
             points: pointsToAdd
           });
 
-          this.resetInvoice();
+          this.resetAll();
           Swal.fire({
             title: 'نجاح',
             text: res.message || `تم إضافة ${pointsToAdd} نقطة من فاتورة ${invoiceTotal} ج.م ✅`,
@@ -178,7 +249,7 @@ export class QrComponent {
         } else {
           Swal.fire({
             title: 'فشل الإضافة',
-            text: res.message || 'تعذر إضافة النقاط على هذه الفاتورة ❌',
+            text: res.message || 'عفواً، هذا الكود غير صالح أو تم استخدامه ❌',
             icon: 'error'
           });
         }
@@ -193,6 +264,10 @@ export class QrComponent {
         });
       }
     });
+  }
+
+  ngOnDestroy(): void {
+    this.stopCamera();
   }
 
   private readFileAsDataUrl(file: File): Promise<string> {
