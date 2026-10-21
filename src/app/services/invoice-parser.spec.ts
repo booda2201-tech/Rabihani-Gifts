@@ -36,6 +36,8 @@ describe('invoice parser', () => {
     expect(result.invoiceTotal).toBe(50.0122);
     expect(result.points).toBe(5);
     expect(result.invoiceNumber).toBe('FO18898120878790');
+    expect(result.invoiceNumberTrusted).toBeTrue();
+    expect(result.amountSource).toBe('paid');
     expect(result.customerPhone).toBe('01114311146');
     expect(result.confidence).toBe('high');
   });

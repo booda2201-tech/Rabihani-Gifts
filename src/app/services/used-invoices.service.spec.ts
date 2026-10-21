@@ -26,4 +26,18 @@ describe('UsedInvoicesService', () => {
     expect(duplicate?.uploadedAt).toBe('2026-09-20 17:21:05');
     expect(service.findDuplicate('ZO18896118771070')).toBeNull();
   });
+
+  it('rejects the same photo even when the invoice number was read differently', () => {
+    service.markUsed({
+      invoiceNumber: 'FO18898120878790',
+      imageAddedAt: '2026-10-21 11:00:00',
+      uploadedAt: '2026-10-21 11:00:00',
+      total: 100,
+      points: 10,
+      imageHash: 'abc123'
+    });
+
+    expect(service.findDuplicateImage('abc123')?.invoiceNumber).toBe('FO18898120878790');
+    expect(service.findDuplicateImage('other')).toBeNull();
+  });
 });

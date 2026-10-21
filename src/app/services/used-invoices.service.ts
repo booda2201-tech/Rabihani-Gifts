@@ -6,6 +6,7 @@ export interface UsedInvoiceRecord {
   uploadedAt: string;
   total: number | null;
   points: number;
+  imageHash?: string;
 }
 
 @Injectable({
@@ -22,6 +23,14 @@ export class UsedInvoicesService {
     return this.read()[normalizeInvoiceNumber(invoiceNumber)] || null;
   }
 
+  findDuplicateImage(imageHash: string | null | undefined): UsedInvoiceRecord | null {
+    if (!imageHash) {
+      return null;
+    }
+
+    return Object.values(this.read()).find((record) => record.imageHash === imageHash) || null;
+  }
+
   markUsed(record: UsedInvoiceRecord): void {
     if (!record.invoiceNumber) {
       return;
@@ -29,7 +38,7 @@ export class UsedInvoicesService {
 
     const all = this.read();
     all[normalizeInvoiceNumber(record.invoiceNumber)] = record;
-    localStorage.setItem(this.storageKey, JSON.stringify(all));
+    localStorage.setItem(this.storageKey, JSON.stringify(pruneOldest(all)));
   }
 
   private read(): Record<string, UsedInvoiceRecord> {
@@ -54,4 +63,17 @@ export function formatDateTimeToSecond(value: Date | number): string {
 
 function normalizeInvoiceNumber(invoiceNumber: string): string {
   return invoiceNumber.trim().toUpperCase();
+}
+
+function pruneOldest(records: Record<string, UsedInvoiceRecord>): Record<string, UsedInvoiceRecord> {
+  const entries = Object.entries(records);
+  if (entries.length <= 2000) {
+    return records;
+  }
+
+  return Object.fromEntries(
+    entries
+      .sort((left, right) => right[1].uploadedAt.localeCompare(left[1].uploadedAt))
+      .slice(0, 2000)
+  );
 }

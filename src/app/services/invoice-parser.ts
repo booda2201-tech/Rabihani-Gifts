@@ -11,6 +11,8 @@ export interface InvoiceParseResult {
   customerPhone: string | null;
   invoiceTotal: number | null;
   points: number;
+  amountSource: 'paid' | 'net' | 'total' | 'fallback' | null;
+  invoiceNumberTrusted: boolean;
   confidence: 'high' | 'medium' | 'low';
   rawText: string;
 }
@@ -29,7 +31,8 @@ const FIELD_PATTERNS: Record<
 };
 
 const MONEY_RE = /(\d{1,7}[.,]\d{2,4})/g;
-const INVOICE_NO_RE = /(?:invoice|nvoice|فاتور)[^\nA-Z0-9]{0,20}([A-Z]{1,4}\d{8,})/i;
+const INVOICE_NO_FORWARD_RE = /(?:invoice|nvoice|فاتور)[^\n]{0,30}?([A-Z]{1,4}\d{8,})/i;
+const INVOICE_NO_BACKWARD_RE = /([A-Z]{1,4}\d{8,})[^\n]{0,30}?(?:invoice|nvoice|فاتور)/i;
 const INVOICE_NO_FALLBACK_RE = /\b([A-Z]{1,3}\d{10,})\b/;
 const INVOICE_DATE_RE = /(\d{1,2}-[A-Za-z]{3,9}-\d{4})/;
 const PHONE_LABELED_RE = /(?:هاتف(?:\s*العميل)?|mobile|cust\.?\s*mobile)[^\d+]{0,24}(\+?0?\d{8,13})/i;
@@ -71,23 +74,37 @@ export function parseInvoiceText(text: string): InvoiceParseResult {
     });
   }
 
+  let usedFallback = false;
   if (found.paid == null && found.net == null && found.totalAmount == null) {
     const fallback = extractMoneyValues(normalized).filter((value) => value > 0);
     if (fallback.length) {
       found.totalAmount = fallback[fallback.length - 1];
+      usedFallback = true;
     }
   }
 
   const invoiceTotal = found.paid ?? found.net ?? found.totalAmount;
+  const amountSource = found.paid != null
+    ? 'paid'
+    : found.net != null
+      ? 'net'
+      : usedFallback
+        ? 'fallback'
+        : found.totalAmount != null
+          ? 'total'
+          : null;
   const matchedFields = [found.paid, found.net, found.totalAmount].filter((value) => value != null).length;
+  const invoiceNumber = extractInvoiceNumber(normalized);
 
   return {
     ...found,
-    invoiceNumber: extractInvoiceNumber(normalized),
+    invoiceNumber: invoiceNumber.value,
     invoiceDate: extractInvoiceDate(normalized),
     customerPhone: extractCustomerPhone(normalized),
     invoiceTotal,
     points: invoiceTotal == null ? 0 : calculateInvoicePoints(invoiceTotal),
+    amountSource,
+    invoiceNumberTrusted: invoiceNumber.trusted,
     confidence: matchedFields >= 2 ? 'high' : matchedFields === 1 ? 'medium' : 'low',
     rawText: text
   };
@@ -121,19 +138,24 @@ function pickLineAmount(amounts: number[]): number {
   return (meaningful.length ? meaningful : amounts)[0];
 }
 
-function extractInvoiceNumber(text: string): string | null {
-  const labeled = text.match(INVOICE_NO_RE);
+function extractInvoiceNumber(text: string): { value: string | null; trusted: boolean } {
+  const labeled = text.match(INVOICE_NO_FORWARD_RE) || text.match(INVOICE_NO_BACKWARD_RE);
   if (labeled?.[1]) {
-    return labeled[1].toUpperCase();
+    return { value: labeled[1].toUpperCase(), trusted: true };
   }
 
   const fallback = text.match(INVOICE_NO_FALLBACK_RE);
-  return fallback ? fallback[1].toUpperCase() : null;
+  return { value: fallback ? fallback[1].toUpperCase() : null, trusted: false };
 }
 
 function extractInvoiceDate(text: string): string | null {
-  const match = text.match(INVOICE_DATE_RE);
-  return match ? match[1] : null;
+  const labeled = text.match(/(?:تاريخ(?:\s*الفاتورة)?|invoice\s*date|\bdate\b)[^\dA-Za-z]{0,16}(\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}|\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}|\d{1,2}-[A-Za-z]{3,9}-\d{4})/i);
+  if (labeled?.[1]) {
+    return labeled[1];
+  }
+
+  const named = text.match(INVOICE_DATE_RE);
+  return named ? named[1] : null;
 }
 
 function extractCustomerPhone(text: string): string | null {

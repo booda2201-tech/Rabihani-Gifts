@@ -112,7 +112,7 @@
 .customer-chip {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   background: rgba(16, 185, 129, 0.08);
   border: 1px solid rgba(16, 185, 129, 0.25);
@@ -121,8 +121,35 @@
   margin-bottom: 16px;
   text-align: right;
 
+  .customer-info { flex: 1; min-width: 0; }
+
   small { display: block; color: #6ee7b7; font-size: 11px; margin-bottom: 4px; }
-  strong { color: #fff; font-size: 13px; word-break: break-all; }
+
+  .customer-name {
+    display: block;
+    color: #fff;
+    font-size: 18px;
+    line-height: 1.4;
+    margin-bottom: 8px;
+  }
+
+  .customer-code { color: #fff; font-size: 13px; word-break: break-all; }
+
+  .customer-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .field {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+
+    span { color: #6ee7b7; }
+    b { color: #fff; font-weight: 600; word-break: break-all; }
+  }
 }
 
 .btn-rescan {
@@ -245,7 +272,12 @@
   color: #94a3b8;
   font-size: 13px;
 
-  strong { color: #fff; font-size: 14px; }
+  strong {
+    color: #fff;
+    font-size: 14px;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
 
   &.subtle strong { color: #cbd5e1; font-weight: 500; }
 

@@ -10,6 +10,7 @@ export type InvoiceAnalysis = InvoiceParseResult;
 
 type TesseractWorker = {
   recognize(image: string): Promise<{ data: { text: string } }>;
+  setParameters(params: Record<string, string>): Promise<void>;
   terminate(): Promise<void>;
 };
 
@@ -22,6 +23,7 @@ type TesseractApi = {
       workerPath?: string;
       corePath?: string;
       langPath?: string;
+      gzip?: boolean;
     }
   ) => Promise<TesseractWorker>;
 };
@@ -31,28 +33,23 @@ type TesseractApi = {
 })
 export class InvoiceAiService implements OnDestroy {
   private worker: TesseractWorker | null = null;
+  private workerPromise: Promise<TesseractWorker> | null = null;
+  private progressListener: ((progress: InvoiceProgress) => void) | null = null;
+
+  warmup(): void {
+    void this.getWorker().catch(() => undefined);
+  }
 
   async analyzeInvoice(
     image: string,
     onProgress?: (progress: InvoiceProgress) => void
   ): Promise<InvoiceAnalysis> {
-    onProgress?.({ status: 'جاري تجهيز صورة الفاتورة...', progress: 5 });
+    this.progressListener = onProgress || null;
+    onProgress?.({ status: 'جاري تجهيز صورة الفاتورة...', progress: 8 });
     const processedImage = await this.prepareImage(image);
 
-    onProgress?.({ status: 'جاري تحميل نموذج قراءة الفاتورة...', progress: 12 });
-    const worker = await this.getWorker((message) => {
-      if (message.status === 'recognizing text') {
-        onProgress?.({
-          status: 'جاري قراءة الفاتورة ...',
-          progress: Math.round(20 + message.progress * 70)
-        });
-      } else if (message.status) {
-        onProgress?.({
-          status: 'جاري تحميل نموذج قراءة الفاتورة...',
-          progress: Math.min(20, Math.round((message.progress || 0) * 20))
-        });
-      }
-    });
+    onProgress?.({ status: 'جاري قراءة الفاتورة...', progress: 18 });
+    const worker = await this.getWorker();
 
     const { data } = await worker.recognize(processedImage);
     onProgress?.({ status: 'جاري استخراج إجمالي الفاتورة...', progress: 95 });
@@ -70,21 +67,83 @@ export class InvoiceAiService implements OnDestroy {
     void this.terminateWorker();
   }
 
-  private async getWorker(
-    logger: (message: { status: string; progress: number }) => void
-  ): Promise<TesseractWorker> {
+  private getWorker(): Promise<TesseractWorker> {
     if (this.worker) {
-      return this.worker;
+      return Promise.resolve(this.worker);
     }
 
+    if (!this.workerPromise) {
+      this.workerPromise = this.createWorker().catch((error) => {
+        this.workerPromise = null;
+        throw error;
+      });
+    }
+
+    return this.workerPromise;
+  }
+
+  private async createWorker(): Promise<TesseractWorker> {
+    const cores = [
+      'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1/tesseract-core-simd-lstm.wasm.js',
+      'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1/tesseract-core-lstm.wasm.js'
+    ];
+    let lastError: unknown;
+
+    for (const corePath of cores) {
+      try {
+        return await this.bootWorker(corePath);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('تعذر تحميل نموذج قراءة الفاتورة');
+  }
+
+  private async bootWorker(corePath: string): Promise<TesseractWorker> {
     const Tesseract = await this.loadTesseract();
-    this.worker = await Tesseract.createWorker('ara+eng', 1, {
-      logger,
+    const worker = await Tesseract.createWorker('ara+eng', 1, {
+      logger: (message) => this.handleWorkerLog(message),
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
-      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1/tesseract-core.wasm.js',
-      langPath: 'https://tessdata.projectnaptha.com/4.0.0'
+      corePath,
+      langPath: 'https://tessdata.projectnaptha.com/4.0.0_fast',
+      gzip: true
     });
-    return this.worker;
+
+    this.worker = worker;
+
+    try {
+      await worker.setParameters({
+        tessedit_pageseg_mode: '4',
+        classify_enable_learning: '0',
+        user_defined_dpi: '300'
+      });
+    } catch {
+      // Reading still works if the runtime rejects optional parameters.
+    }
+
+    return worker;
+  }
+
+  private handleWorkerLog(message: { status: string; progress: number }): void {
+    if (!this.progressListener) {
+      return;
+    }
+
+    if (message.status === 'recognizing text') {
+      this.progressListener({
+        status: 'جاري قراءة الفاتورة...',
+        progress: Math.round(20 + message.progress * 70)
+      });
+      return;
+    }
+
+    if (message.status) {
+      this.progressListener({
+        status: 'جاري تجهيز القراءة...',
+        progress: Math.min(20, Math.round((message.progress || 0) * 20))
+      });
+    }
   }
 
   private loadTesseract(): Promise<TesseractApi> {
@@ -111,9 +170,11 @@ export class InvoiceAiService implements OnDestroy {
   }
 
   private async terminateWorker(): Promise<void> {
-    if (this.worker) {
-      await this.worker.terminate();
-      this.worker = null;
+    const worker = this.worker;
+    this.worker = null;
+    this.workerPromise = null;
+    if (worker) {
+      await worker.terminate();
     }
   }
 
@@ -121,8 +182,9 @@ export class InvoiceAiService implements OnDestroy {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        const maxWidth = 1400;
-        const scale = Math.min(1, maxWidth / img.width);
+        const maxWidth = 1100;
+        const maxHeight = 1500;
+        const scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.round(img.width * scale));
         canvas.height = Math.max(1, Math.round(img.height * scale));
@@ -133,9 +195,9 @@ export class InvoiceAiService implements OnDestroy {
           return;
         }
 
-        ctx.filter = 'grayscale(1) contrast(1.4) brightness(1.08)';
+        ctx.filter = 'grayscale(1) contrast(1.35)';
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
       };
       img.onerror = () => reject(new Error('تعذر فتح صورة الفاتورة'));
       img.src = image;

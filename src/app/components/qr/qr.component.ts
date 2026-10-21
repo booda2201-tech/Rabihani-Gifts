@@ -1,5 +1,8 @@
 import { Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { ApiService } from '../../services/api.service';
+import { parseCustomerQr, type CustomerQrProfile } from '../../services/customer-qr';
+import { fingerprintImage, reviewCapture, reviewInvoiceReading } from '../../services/invoice-guard';
+import { calculateInvoicePoints } from '../../services/invoice-parser';
 import { InvoiceAiService, type InvoiceAnalysis } from '../../services/invoice-ai.service';
 import { formatDateTimeToSecond, UsedInvoicesService } from '../../services/used-invoices.service';
 import Swal from 'sweetalert2';
@@ -16,6 +19,7 @@ export class QrComponent implements OnDestroy {
 
   isScanning = false;
   currentCode = '';
+  customer: CustomerQrProfile | null = null;
   stream: MediaStream | null = null;
   animationId: any;
 
@@ -27,12 +31,16 @@ export class QrComponent implements OnDestroy {
   analyzeError: string | null = null;
   imageAddedAt: string | null = null;
   uploadedAt: string | null = null;
+  imageHash: string | null = null;
+  isSubmitting = false;
 
   constructor(
     private apiService: ApiService,
     private invoiceAi: InvoiceAiService,
     private usedInvoices: UsedInvoicesService
-  ) {}
+  ) {
+    this.invoiceAi.warmup();
+  }
 
   get customerScanned(): boolean {
     return !!this.currentCode;
@@ -46,6 +54,7 @@ export class QrComponent implements OnDestroy {
       && !!this.imageAddedAt
       && !!this.uploadedAt
       && !this.isAnalyzing
+      && !this.isSubmitting
       && !this.analyzeError;
   }
 
@@ -94,7 +103,9 @@ export class QrComponent implements OnDestroy {
   }
 
   onCodeResult(result: string) {
-    this.currentCode = result;
+    const code = result.trim();
+    this.currentCode = code;
+    this.customer = parseCustomerQr(code);
     this.stopCamera();
     this.isScanning = false;
     this.resetInvoice();
@@ -110,6 +121,7 @@ export class QrComponent implements OnDestroy {
 
   rescanCustomer() {
     this.currentCode = '';
+    this.customer = null;
     this.resetInvoice();
     this.startScanning();
   }
@@ -137,9 +149,31 @@ export class QrComponent implements OnDestroy {
       return;
     }
 
-    this.imageAddedAt = formatDateTimeToSecond(file.lastModified || Date.now());
-    this.uploadedAt = formatDateTimeToSecond(Date.now());
-    this.invoicePreview = await this.readFileAsDataUrl(file);
+    const capturedAt = Date.now();
+    this.analysis = null;
+    this.analyzeError = null;
+    this.imageHash = null;
+    this.imageAddedAt = formatDateTimeToSecond(file.lastModified || capturedAt);
+    this.uploadedAt = formatDateTimeToSecond(capturedAt);
+
+    const captureReview = reviewCapture(file.lastModified, capturedAt);
+    const [preview, imageHash] = await Promise.all([
+      this.readFileAsDataUrl(file),
+      fingerprintImage(file)
+    ]);
+    this.invoicePreview = preview;
+    this.imageHash = imageHash;
+    if (!captureReview.allowed) {
+      this.analyzeError = captureReview.reason;
+      return;
+    }
+
+    const duplicateImage = this.usedInvoices.findDuplicateImage(this.imageHash);
+    if (duplicateImage) {
+      this.analyzeError = `الصورة دي اتسجلت قبل كده في ${duplicateImage.uploadedAt}، ومش هيتضاف عليها نقاط تاني.`;
+      return;
+    }
+
     await this.analyzeInvoice();
   }
 
@@ -160,20 +194,14 @@ export class QrComponent implements OnDestroy {
         this.analyzeProgress = progress.progress;
       });
 
-      if (!this.analysis.invoiceNumber) {
-        this.analyzeError = 'تعذر قراءة رقم الفاتورة. صوّرها مرة أخرى بوضوح مع ظهور رقم الفاتورة.';
-        return;
-      }
-
-      if (this.analysis.points <= 0) {
-        this.analyzeError = 'المبلغ المستخرج صغير جداً لإضافة نقاط. تأكد من وضوح الإجمالي.';
-        return;
-      }
-
-      const previous = this.usedInvoices.findDuplicate(this.analysis.invoiceNumber);
-      if (previous) {
-        this.analyzeError =
-          `الفاتورة رقم ${this.analysis.invoiceNumber} اترفعت قبل كده في ${previous.uploadedAt}، ومش هيتضاف عليها نقاط تاني.`;
+      const review = reviewInvoiceReading({
+        analysis: this.analysis,
+        duplicateInvoice: this.usedInvoices.findDuplicate(this.analysis.invoiceNumber),
+        duplicateImage: this.usedInvoices.findDuplicateImage(this.imageHash),
+        now: new Date()
+      });
+      if (!review.allowed) {
+        this.analyzeError = review.reason;
       }
     } catch (error: any) {
       this.analysis = null;
@@ -192,10 +220,13 @@ export class QrComponent implements OnDestroy {
     this.analyzeError = null;
     this.imageAddedAt = null;
     this.uploadedAt = null;
+    this.imageHash = null;
   }
 
   resetAll() {
     this.currentCode = '';
+    this.customer = null;
+    this.isSubmitting = false;
     this.resetInvoice();
   }
 
@@ -206,12 +237,25 @@ export class QrComponent implements OnDestroy {
     }
 
     const analysis = this.analysis;
-    const pointsToAdd = analysis.points;
+    const review = reviewInvoiceReading({
+      analysis,
+      duplicateInvoice: this.usedInvoices.findDuplicate(analysis.invoiceNumber),
+      duplicateImage: this.usedInvoices.findDuplicateImage(this.imageHash),
+      now: new Date()
+    });
+    if (!review.allowed || !analysis.invoiceTotal || !analysis.invoiceNumber) {
+      this.analyzeError = review.reason || 'الفاتورة غير مقبولة';
+      return;
+    }
+
     const invoiceTotal = analysis.invoiceTotal;
-    const invoiceNumber = analysis.invoiceNumber as string;
+    const pointsToAdd = calculateInvoicePoints(invoiceTotal);
+    const invoiceNumber = analysis.invoiceNumber;
     const imageAddedAt = this.imageAddedAt;
     const uploadedAt = this.uploadedAt;
     const publicCode = this.currentCode;
+    const imageHash = this.imageHash || undefined;
+    this.isSubmitting = true;
 
     Swal.fire({
       title: 'جاري حفظ النقاط...',
@@ -237,7 +281,8 @@ export class QrComponent implements OnDestroy {
             imageAddedAt,
             uploadedAt,
             total: invoiceTotal,
-            points: pointsToAdd
+            points: pointsToAdd,
+            imageHash
           });
 
           this.resetAll();
@@ -247,6 +292,7 @@ export class QrComponent implements OnDestroy {
             icon: 'success'
           });
         } else {
+          this.isSubmitting = false;
           Swal.fire({
             title: 'فشل الإضافة',
             text: res.message || 'عفواً، هذا الكود غير صالح أو تم استخدامه ❌',
@@ -256,6 +302,7 @@ export class QrComponent implements OnDestroy {
       },
       error: (err) => {
         Swal.close();
+        this.isSubmitting = false;
         console.error('API Error:', err);
         Swal.fire({
           title: 'خطأ في الاتصال',

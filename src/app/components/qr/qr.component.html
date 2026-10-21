@@ -34,11 +34,18 @@
 
     <div class="invoice-section" *ngIf="customerScanned">
       <div class="customer-chip">
-        <div>
-          <small>تم مسح العميل</small>
-          <strong>{{ currentCode }}</strong>
+        <div class="customer-info">
+          <small>بيانات العميل</small>
+          <strong class="customer-name" *ngIf="customer?.name">{{ customer?.name }}</strong>
+          <div class="customer-fields" *ngIf="customer?.fields?.length">
+            <div class="field" *ngFor="let field of customer?.fields">
+              <span>{{ field.label }}</span>
+              <b>{{ field.value }}</b>
+            </div>
+          </div>
+          <strong class="customer-code" *ngIf="!customer?.name && !customer?.fields?.length">{{ currentCode }}</strong>
         </div>
-        <button type="button" class="btn-rescan" (click)="rescanCustomer()" [disabled]="isAnalyzing">
+        <button type="button" class="btn-rescan" (click)="rescanCustomer()" [disabled]="isAnalyzing || isSubmitting">
           إعادة المسح
         </button>
       </div>
@@ -60,7 +67,7 @@
 
       <div class="invoice-preview-wrap" *ngIf="invoicePreview">
         <img [src]="invoicePreview" alt="صورة الفاتورة" />
-        <button type="button" class="btn-retake" (click)="resetInvoice()" [disabled]="isAnalyzing">
+        <button type="button" class="btn-retake" (click)="resetInvoice()" [disabled]="isAnalyzing || isSubmitting">
           <i class="bi bi-arrow-repeat"></i> إعادة تصوير الفاتورة
         </button>
       </div>
