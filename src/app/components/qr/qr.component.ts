@@ -15,9 +15,10 @@ import jsQR from 'jsqr';
 })
 export class QrComponent implements OnDestroy {
   @ViewChild('video') videoElement!: ElementRef<HTMLVideoElement>;
-  @ViewChild('cameraInput') cameraInput!: ElementRef<HTMLInputElement>;
+  @ViewChild('invoiceVideo') invoiceVideo?: ElementRef<HTMLVideoElement>;
 
   isScanning = false;
+  isCapturingInvoice = false;
   currentCode = '';
   customer: CustomerQrProfile | null = null;
   stream: MediaStream | null = null;
@@ -120,25 +121,78 @@ export class QrComponent implements OnDestroy {
   }
 
   rescanCustomer() {
+    this.stopCamera();
+    this.isCapturingInvoice = false;
     this.currentCode = '';
     this.customer = null;
     this.resetInvoice();
     this.startScanning();
   }
 
-  openCamera() {
-    this.cameraInput?.nativeElement.click();
-  }
-
-  async onInvoiceSelected(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-
-    if (!file) {
+  async startInvoiceCamera() {
+    if (this.isAnalyzing || this.isSubmitting) {
       return;
     }
 
+    this.stopCamera();
+    this.analyzeError = null;
+    this.isCapturingInvoice = true;
+
+    try {
+      this.stream = await this.openCameraStream();
+      const video = await this.waitForInvoiceVideo();
+      video.srcObject = this.stream;
+      video.setAttribute('playsinline', 'true');
+      await video.play();
+    } catch {
+      this.stopCamera();
+      this.isCapturingInvoice = false;
+      Swal.fire('خطأ', 'تعذر فتح الكاميرا لتصوير الفاتورة', 'error');
+    }
+  }
+
+  async captureInvoicePhoto() {
+    const video = this.invoiceVideo?.nativeElement;
+    if (!video?.videoWidth) {
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+
+    ctx.drawImage(video, 0, 0);
+    this.stopCamera();
+    this.isCapturingInvoice = false;
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) {
+      this.analyzeError = 'تعذر التقاط صورة الفاتورة';
+      return;
+    }
+
+    const file = new File([blob], `invoice-${Date.now()}.jpg`, {
+      type: 'image/jpeg',
+      lastModified: Date.now()
+    });
+    await this.onInvoiceSelected(file);
+  }
+
+  cancelInvoiceCamera() {
+    this.stopCamera();
+    this.isCapturingInvoice = false;
+  }
+
+  retakeInvoice() {
+    this.resetInvoice();
+    void this.startInvoiceCamera();
+  }
+
+  async onInvoiceSelected(file: File) {
     if (!file.type.startsWith('image/')) {
       this.analyzeError = 'يرجى اختيار صورة واضحة للفاتورة';
       return;
@@ -212,6 +266,7 @@ export class QrComponent implements OnDestroy {
   }
 
   resetInvoice() {
+    this.cancelInvoiceCamera();
     this.invoicePreview = null;
     this.analysis = null;
     this.isAnalyzing = false;
@@ -315,6 +370,39 @@ export class QrComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.stopCamera();
+  }
+
+  private async openCameraStream(): Promise<MediaStream> {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      });
+    } catch {
+      return navigator.mediaDevices.getUserMedia({ video: true });
+    }
+  }
+
+  private waitForInvoiceVideo(): Promise<HTMLVideoElement> {
+    return new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        const video = this.invoiceVideo?.nativeElement;
+        if (video) {
+          resolve(video);
+          return;
+        }
+        if (Date.now() - started > 2000) {
+          reject(new Error('تعذر فتح الكاميرا'));
+          return;
+        }
+        requestAnimationFrame(check);
+      };
+      check();
+    });
   }
 
   private readFileAsDataUrl(file: File): Promise<string> {

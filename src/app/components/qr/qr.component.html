@@ -50,24 +50,28 @@
         </button>
       </div>
 
-      <input
-        #cameraInput
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        (change)="onInvoiceSelected($event)"
-      />
-
-      <div class="invoice-actions" *ngIf="!invoicePreview">
-        <button type="button" class="btn-camera" (click)="openCamera()">
+      <div class="invoice-actions" *ngIf="!invoicePreview && !isCapturingInvoice">
+        <button type="button" class="btn-camera" (click)="startInvoiceCamera()" [disabled]="isAnalyzing || isSubmitting">
           <i class="bi bi-camera-fill"></i> تصوير الفاتورة
+        </button>
+      </div>
+
+      <div class="scanner-section" *ngIf="isCapturingInvoice">
+        <div class="video-wrapper">
+          <video #invoiceVideo autoplay playsinline muted class="qr-video"></video>
+          <div class="scanner-overlay invoice-frame"></div>
+        </div>
+        <button type="button" class="btn-camera mt-3" (click)="captureInvoicePhoto()">
+          <i class="bi bi-camera-fill"></i> التقاط صورة الفاتورة
+        </button>
+        <button type="button" class="btn-retake" (click)="cancelInvoiceCamera()">
+          إلغاء
         </button>
       </div>
 
       <div class="invoice-preview-wrap" *ngIf="invoicePreview">
         <img [src]="invoicePreview" alt="صورة الفاتورة" />
-        <button type="button" class="btn-retake" (click)="resetInvoice()" [disabled]="isAnalyzing || isSubmitting">
+        <button type="button" class="btn-retake" (click)="retakeInvoice()" [disabled]="isAnalyzing || isSubmitting">
           <i class="bi bi-arrow-repeat"></i> إعادة تصوير الفاتورة
         </button>
       </div>
@@ -104,7 +108,7 @@
           <strong>{{ analysis.totalAmount | number: '1.2-2' }} ج.م</strong>
         </div>
         <div class="result-row points">
-          <span>النقاط المستحقة (10%)</span>
+          <span>النقاط المستحقة (20%)</span>
           <strong>{{ analysis.points }} نقطة</strong>
         </div>
       </div>

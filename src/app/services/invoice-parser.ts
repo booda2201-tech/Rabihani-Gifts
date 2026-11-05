@@ -1,4 +1,4 @@
-export const INVOICE_POINTS_RATE = 0.1;
+export const INVOICE_POINTS_RATE = 0.2;
 
 export interface InvoiceParseResult {
   totalAmount: number | null;
@@ -139,13 +139,22 @@ function pickLineAmount(amounts: number[]): number {
 }
 
 function extractInvoiceNumber(text: string): { value: string | null; trusted: boolean } {
-  const labeled = text.match(INVOICE_NO_FORWARD_RE) || text.match(INVOICE_NO_BACKWARD_RE);
+  const collapsed = text
+    .replace(/([A-Za-z])\s+(?=\d)/g, '$1')
+    .replace(/(\d)\s+(?=\d)/g, '$1');
+  const labeled = collapsed.match(INVOICE_NO_FORWARD_RE) || collapsed.match(INVOICE_NO_BACKWARD_RE);
   if (labeled?.[1]) {
     return { value: labeled[1].toUpperCase(), trusted: true };
   }
 
-  const fallback = text.match(INVOICE_NO_FALLBACK_RE);
-  return { value: fallback ? fallback[1].toUpperCase() : null, trusted: false };
+  const nearLabel = collapsed.match(/(?:invoice|nvoice|فاتور)[^\n]{0,40}?(\d{4,})(?![.,]\d)/i)
+    || collapsed.match(/(\d{4,})(?![.,]\d)[^\n]{0,40}?(?:invoice|nvoice|فاتور)/i);
+  if (nearLabel?.[1]) {
+    return { value: nearLabel[1], trusted: true };
+  }
+
+  const fallback = collapsed.match(INVOICE_NO_FALLBACK_RE);
+  return { value: fallback ? fallback[1].toUpperCase() : null, trusted: !!fallback?.[1] };
 }
 
 function extractInvoiceDate(text: string): string | null {

@@ -92,6 +92,11 @@
       width: 200px; height: 200px;
       border: 2px solid rgba(59, 130, 246, 0.5);
       box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.4);
+
+      &.invoice-frame {
+        width: 78%;
+        height: 72%;
+      }
     }
   }
 

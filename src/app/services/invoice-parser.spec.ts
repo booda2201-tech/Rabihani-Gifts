@@ -22,10 +22,10 @@ Change 0.0000 المتبقي
 `;
 
 describe('invoice parser', () => {
-  it('calculates 10 percent points from the invoice total', () => {
-    expect(calculateInvoicePoints(1000)).toBe(100);
-    expect(calculateInvoicePoints(140.0022)).toBe(14);
-    expect(calculateInvoicePoints(50.0122)).toBe(5);
+  it('calculates 20 percent points from the invoice total', () => {
+    expect(calculateInvoicePoints(1000)).toBe(200);
+    expect(calculateInvoicePoints(140.0022)).toBe(28);
+    expect(calculateInvoicePoints(50.0122)).toBe(10);
   });
 
   it('reads the paid total from a Forto-style receipt', () => {
@@ -34,8 +34,10 @@ describe('invoice parser', () => {
     expect(result.totalAmount).toBe(350.88);
     expect(result.paid).toBe(50.0122);
     expect(result.invoiceTotal).toBe(50.0122);
-    expect(result.points).toBe(5);
+    expect(result.points).toBe(10);
     expect(result.invoiceNumber).toBe('FO18898120878790');
+    expect(parseInvoiceText('رقم الفاتورة 18898120\nالمدفوع 50.00').invoiceNumber).toBe('18898120');
+    expect(parseInvoiceText('Invoice No. FO 18898120878790').invoiceNumber).toBe('FO18898120878790');
     expect(result.invoiceNumberTrusted).toBeTrue();
     expect(result.amountSource).toBe('paid');
     expect(result.customerPhone).toBe('01114311146');
@@ -48,7 +50,7 @@ describe('invoice parser', () => {
     expect(result.totalAmount).toBe(122.8088);
     expect(result.paid).toBe(140.0022);
     expect(result.invoiceTotal).toBe(140.0022);
-    expect(result.points).toBe(14);
+    expect(result.points).toBe(28);
     expect(result.invoiceNumber).toBe('ZO18896118771070');
   });
 
@@ -66,9 +68,9 @@ describe('invoice parser', () => {
     `);
 
     expect(forto.invoiceTotal).toBe(50.012);
-    expect(forto.points).toBe(5);
+    expect(forto.points).toBe(10);
     expect(bubble.invoiceTotal).toBe(140.002);
-    expect(bubble.points).toBe(14);
+    expect(bubble.points).toBe(28);
   });
 
 });
