@@ -1,7 +1,9 @@
 import { calculateInvoicePoints, parseInvoiceText } from './invoice-parser';
 
 const FORTO_RECEIPT = `
-Invoice No. FO18898120878790 رقم الفاتورة
+PORTO مغسله
+Invoice No. FO1907512037141 رقم الفاتورة
+732
 Cust. Mobile 01114311146 هاتف العميل
 fotalal Amounto 350.8800 الإجمالي
 Discorint 307.01 الخصم
@@ -12,7 +14,9 @@ changge 0.0000 المتبقي
 `;
 
 const BUBBLE_RECEIPT = `
-Invoice No. ZO18896118771070 رقم الفاتورة
+Bubble كافيه زول
+Invoice No. ZO1919921821912 رقم الفاتورة
+222
 TotalAmounto 122.8088 الإجمالي
 Discount 0.0000 الخصم
 Taxax 17.1933 الضريبة
@@ -35,9 +39,9 @@ describe('invoice parser', () => {
     expect(result.paid).toBe(50.0122);
     expect(result.invoiceTotal).toBe(50.0122);
     expect(result.points).toBe(10);
-    expect(result.invoiceNumber).toBe('FO18898120878790');
-    expect(parseInvoiceText('رقم الفاتورة 18898120\nالمدفوع 50.00').invoiceNumber).toBe('18898120');
-    expect(parseInvoiceText('Invoice No. FO 18898120878790').invoiceNumber).toBe('FO18898120878790');
+    expect(result.invoiceNumber).toBe('FO1907512037141732');
+    expect(parseInvoiceText('رقم الفاتورة 18898120\nالمدفوع 50.00').invoiceNumber).toBeNull();
+    expect(parseInvoiceText('Invoice No. FO1907512037141\n732').invoiceNumber).toBeNull();
     expect(result.invoiceNumberTrusted).toBeTrue();
     expect(result.amountSource).toBe('paid');
     expect(result.customerPhone).toBe('01114311146');
@@ -51,7 +55,8 @@ describe('invoice parser', () => {
     expect(result.paid).toBe(140.0022);
     expect(result.invoiceTotal).toBe(140.0022);
     expect(result.points).toBe(28);
-    expect(result.invoiceNumber).toBe('ZO18896118771070');
+    expect(result.invoiceNumber).toBe('ZO1919921821912222');
+    expect(result.invoiceNumberTrusted).toBeTrue();
   });
 
   it('recovers totals from noisy OCR of the real receipts', () => {
@@ -71,6 +76,55 @@ describe('invoice parser', () => {
     expect(forto.points).toBe(10);
     expect(bubble.invoiceTotal).toBe(140.002);
     expect(bubble.points).toBe(28);
+  });
+
+  it('joins the wrapped Porto invoice number and uses the paid amount', () => {
+    const result = parseInvoiceText(`
+      PORTO
+      nvoice No. FO1907512037141 رقم الفاتورة
+      732
+      Date 23-Oct-2026
+      Total Amount 175.440 الاجمالي
+      Discount 0.00 خصم
+      Fax 24.562 الضريبة
+      Vet 200.002 الصافي
+      Paid 200.002 المدفوع
+    `);
+
+    expect(result.invoiceNumber).toBe('FO1907512037141732');
+    expect(result.invoiceNumberTrusted).toBeTrue();
+    expect(result.invoiceTotal).toBe(200.002);
+    expect(result.points).toBe(40);
+  });
+
+  it('joins the wrapped Bubble invoice number the same way', () => {
+    const result = parseInvoiceText(`
+      Bubble
+      Invoice No. ZO1919921821912 رقم الفاتورة
+      222
+      Date 10-Nov-2026
+      Total Amount 80.702 الاجمالي
+      Tax 11.298 الضريبة
+      Net 92.001 الصافي
+      Paid 92.001 المدفوع
+    `);
+
+    expect(result.invoiceNumber).toBe('ZO1919921821912222');
+    expect(result.invoiceNumberTrusted).toBeTrue();
+    expect(result.invoiceTotal).toBe(92.001);
+    expect(result.points).toBe(18);
+  });
+
+  it('accepts another Bubble branch when the first two letters change', () => {
+    const result = parseInvoiceText(`
+      Bubble
+      Invoice No. KM1919921821999 رقم الفاتورة
+      441
+      Paid 40.00 المدفوع
+    `);
+
+    expect(result.invoiceNumber).toBe('KM1919921821999441');
+    expect(result.invoiceNumberTrusted).toBeTrue();
   });
 
 });

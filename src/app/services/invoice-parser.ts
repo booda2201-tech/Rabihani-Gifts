@@ -31,9 +31,6 @@ const FIELD_PATTERNS: Record<
 };
 
 const MONEY_RE = /(\d{1,7}[.,]\d{2,4})/g;
-const INVOICE_NO_FORWARD_RE = /(?:invoice|nvoice|فاتور)[^\n]{0,30}?([A-Z]{1,4}\d{8,})/i;
-const INVOICE_NO_BACKWARD_RE = /([A-Z]{1,4}\d{8,})[^\n]{0,30}?(?:invoice|nvoice|فاتور)/i;
-const INVOICE_NO_FALLBACK_RE = /\b([A-Z]{1,3}\d{10,})\b/;
 const INVOICE_DATE_RE = /(\d{1,2}-[A-Za-z]{3,9}-\d{4})/;
 const PHONE_LABELED_RE = /(?:هاتف(?:\s*العميل)?|mobile|cust\.?\s*mobile)[^\d+]{0,24}(\+?0?\d{8,13})/i;
 const PHONE_EGY_RE = /\b(01[0125]\d{8})\b/;
@@ -139,22 +136,35 @@ function pickLineAmount(amounts: number[]): number {
 }
 
 function extractInvoiceNumber(text: string): { value: string | null; trusted: boolean } {
-  const collapsed = text
-    .replace(/([A-Za-z])\s+(?=\d)/g, '$1')
-    .replace(/(\d)\s+(?=\d)/g, '$1');
-  const labeled = collapsed.match(INVOICE_NO_FORWARD_RE) || collapsed.match(INVOICE_NO_BACKWARD_RE);
-  if (labeled?.[1]) {
-    return { value: labeled[1].toUpperCase(), trusted: true };
+  const porto = extractPortoInvoiceNumber(text);
+  return { value: porto, trusted: porto != null };
+}
+
+function extractPortoInvoiceNumber(text: string): string | null {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+      .replace(/([A-Za-z])\s+(?=\d)/g, '$1')
+      .replace(/(\d)\s+(?=\d)/g, '$1');
+    if (!/invoice|nvoice|فاتور/i.test(line)) {
+      continue;
+    }
+
+    const match = line.match(/([A-Z]{2})(\d{13})\b/i);
+    const continuation = lines[index + 1]?.replace(/\s/g, '') ?? '';
+    if (!match || !/^\d{3}$/.test(continuation) || !isOurStore(text)) {
+      continue;
+    }
+
+    return `${match[1].toUpperCase()}${match[2]}${continuation}`;
   }
 
-  const nearLabel = collapsed.match(/(?:invoice|nvoice|فاتور)[^\n]{0,40}?(\d{4,})(?![.,]\d)/i)
-    || collapsed.match(/(\d{4,})(?![.,]\d)[^\n]{0,40}?(?:invoice|nvoice|فاتور)/i);
-  if (nearLabel?.[1]) {
-    return { value: nearLabel[1], trusted: true };
-  }
+  return null;
+}
 
-  const fallback = collapsed.match(INVOICE_NO_FALLBACK_RE);
-  return { value: fallback ? fallback[1].toUpperCase() : null, trusted: !!fallback?.[1] };
+function isOurStore(text: string): boolean {
+  return /porto|forto|فورت|بورت|مغسل|bubble|بابل|زول/i.test(text);
 }
 
 function extractInvoiceDate(text: string): string | null {

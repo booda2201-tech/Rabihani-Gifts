@@ -51,26 +51,39 @@
       </div>
 
       <div class="invoice-actions" *ngIf="!invoicePreview && !isCapturingInvoice">
-        <button type="button" class="btn-camera" (click)="startInvoiceCamera()" [disabled]="isAnalyzing || isSubmitting">
+        <p class="capture-hint">صورة واحدة. قرّب الموبايل لحد ما الورقة تملا الصورة.</p>
+        <button type="button" class="btn-camera" (click)="photographInvoice()" [disabled]="isAnalyzing || isSubmitting">
           <i class="bi bi-camera-fill"></i> تصوير الفاتورة
         </button>
       </div>
 
-      <div class="scanner-section" *ngIf="isCapturingInvoice">
+      <div class="scanner-section invoice-camera" *ngIf="isCapturingInvoice">
+        <p class="capture-hint">حط الفاتورة جوا الإطار. قرّبها لحد ما الكتابة توضح، وبعدين اضغط زرار التصوير.</p>
         <div class="video-wrapper">
-          <video #invoiceVideo autoplay playsinline muted class="qr-video"></video>
-          <div class="scanner-overlay invoice-frame"></div>
+          <video #invoiceVideo autoplay muted playsinline webkit-playsinline class="qr-video" (click)="focusInvoice($event)"></video>
+          <div class="scanner-overlay invoice-frame" [style.width.%]="frameWidth" [style.height.%]="frameHeight">
+            <small>الفاتورة كلها جوا الإطار</small>
+          </div>
+          <p class="live-status" *ngIf="!cameraReady">جاري فتح الكاميرا...</p>
         </div>
-        <button type="button" class="btn-camera mt-3" (click)="captureInvoicePhoto()">
-          <i class="bi bi-camera-fill"></i> التقاط صورة الفاتورة
-        </button>
-        <button type="button" class="btn-retake" (click)="cancelInvoiceCamera()">
-          إلغاء
-        </button>
+        <div class="shutter-row">
+          <button type="button" class="btn-torch" *ngIf="torchAvailable" (click)="toggleTorch()">
+            {{ torchOn ? 'إطفاء الفلاش' : 'الفلاش' }}
+          </button>
+          <button type="button" class="shutter" (click)="captureInvoicePhoto()" [disabled]="!cameraReady" aria-label="تصوير الفاتورة">
+            <span></span>
+          </button>
+          <button type="button" class="btn-retake shutter-cancel" (click)="cancelInvoiceCamera()">
+            إلغاء
+          </button>
+        </div>
       </div>
+
+      <input #phoneCamera class="phone-camera-input" type="file" accept="image/*" capture="environment" (change)="onPhoneCameraPhoto($event)">
 
       <div class="invoice-preview-wrap" *ngIf="invoicePreview">
         <img [src]="invoicePreview" alt="صورة الفاتورة" />
+        <p class="capture-hint">لو الأرقام مش واضحة، صور الفاتورة تاني من قريب.</p>
         <button type="button" class="btn-retake" (click)="retakeInvoice()" [disabled]="isAnalyzing || isSubmitting">
           <i class="bi bi-arrow-repeat"></i> إعادة تصوير الفاتورة
         </button>
@@ -96,7 +109,7 @@
           <span>تاريخ تصوير الفاتورة</span>
           <strong>{{ uploadedAt }}</strong>
         </div>
-        <div class="result-row">
+        <div class="result-row" *ngIf="analysis.invoiceTotal">
           <span>إجمالي الفاتورة</span>
           <strong>{{ analysis.invoiceTotal | number: '1.2-2' }} ج.م</strong>
         </div>
@@ -108,7 +121,7 @@
           <strong>{{ analysis.totalAmount | number: '1.2-2' }} ج.م</strong>
         </div>
         <div class="result-row points">
-          <span>النقاط المستحقة (20%)</span>
+          <span>النقاط المستحقة</span>
           <strong>{{ analysis.points }} نقطة</strong>
         </div>
       </div>

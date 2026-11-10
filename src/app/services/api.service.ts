@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, isDevMode } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
@@ -6,8 +6,7 @@ import { Observable } from 'rxjs';
   providedIn: 'root'
 })
 export class ApiService {
-  // التحديث الجديد للرابط الأساسي (Production URL)
-  private baseUrl = 'https://api.rabahni.com/api';
+  private baseUrl = isDevMode() ? '/api' : 'https://api.rabahni.com/api';
 
   constructor(private http: HttpClient) { }
 

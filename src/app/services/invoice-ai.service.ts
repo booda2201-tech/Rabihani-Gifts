@@ -42,10 +42,37 @@ export class InvoiceAiService implements OnDestroy {
     void this.getWorker().catch(() => undefined);
   }
 
+  recognizeText(
+    image: string,
+    onProgress?: (progress: InvoiceProgress) => void
+  ): Promise<string> {
+    return this.readImageText(image, onProgress);
+  }
+
   async analyzeInvoice(
     image: string,
     onProgress?: (progress: InvoiceProgress) => void
   ): Promise<InvoiceAnalysis> {
+    const text = await this.readImageText(image, onProgress);
+    onProgress?.({ status: 'جاري استخراج إجمالي الفاتورة...', progress: 95 });
+
+    const analysis = parseInvoiceText(text);
+    if (!analysis.invoiceTotal || analysis.invoiceTotal <= 0) {
+      throw new Error('تعذر قراءة إجمالي الفاتورة. صوّرها مرة أخرى بوضوح مع ظهور الإجمالي.');
+    }
+
+    onProgress?.({ status: 'تم استخراج الإجمالي', progress: 100 });
+    return analysis;
+  }
+
+  ngOnDestroy(): void {
+    void this.terminateWorker();
+  }
+
+  private async readImageText(
+    image: string,
+    onProgress?: (progress: InvoiceProgress) => void
+  ): Promise<string> {
     this.progressListener = onProgress || null;
     onProgress?.({ status: 'جاري تجهيز صورة الفاتورة...', progress: 8 });
     const pages = await this.preparePages(image);
@@ -60,19 +87,7 @@ export class InvoiceAiService implements OnDestroy {
       text += `\n${data?.text || ''}`;
     }
 
-    onProgress?.({ status: 'جاري استخراج إجمالي الفاتورة...', progress: 95 });
-
-    const analysis = parseInvoiceText(text);
-    if (!analysis.invoiceTotal || analysis.invoiceTotal <= 0) {
-      throw new Error('تعذر قراءة إجمالي الفاتورة. صوّرها مرة أخرى بوضوح مع ظهور الإجمالي.');
-    }
-
-    onProgress?.({ status: 'تم استخراج الإجمالي', progress: 100 });
-    return analysis;
-  }
-
-  ngOnDestroy(): void {
-    void this.terminateWorker();
+    return text;
   }
 
   private getWorker(): Promise<TesseractWorker> {
@@ -190,25 +205,42 @@ export class InvoiceAiService implements OnDestroy {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        const maxWidth = 1100;
-        const maxHeight = 1600;
-        const scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(img.width * scale));
-        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const bands = img.height > img.width
+          ? [{ y: 0, height: 0.55 }, { y: 0.45, height: 0.55 }]
+          : [{ y: 0, height: 1 }];
+        const pages: HTMLCanvasElement[] = [];
 
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('تعذر تجهيز صورة الفاتورة'));
-          return;
+        for (const band of bands) {
+          const page = this.bandCanvas(img, band.y, band.height);
+          if (!page) {
+            reject(new Error('تعذر تجهيز صورة الفاتورة'));
+            return;
+          }
+          pages.push(page);
         }
 
-        ctx.filter = 'grayscale(1) contrast(1.35) brightness(1.08)';
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve([canvas]);
+        resolve(pages);
       };
       img.onerror = () => reject(new Error('تعذر فتح صورة الفاتورة'));
       img.src = image;
     });
+  }
+
+  private bandCanvas(img: HTMLImageElement, yRatio: number, heightRatio: number): HTMLCanvasElement | null {
+    const sy = Math.round(img.height * yRatio);
+    const sourceHeight = Math.min(img.height - sy, Math.max(1, Math.round(img.height * heightRatio)));
+    const scale = Math.min(1, 1800 / img.width, 2200 / sourceHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return null;
+    }
+
+    ctx.filter = 'grayscale(1) contrast(1.35) brightness(1.08)';
+    ctx.drawImage(img, 0, sy, img.width, sourceHeight, 0, 0, canvas.width, canvas.height);
+    return canvas;
   }
 }

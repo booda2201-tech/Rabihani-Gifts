@@ -44,11 +44,11 @@ export function reviewInvoiceReading(input: {
   }
 
   if (input.duplicateInvoice && input.analysis.invoiceNumber) {
-    return block(`الفاتورة رقم ${input.analysis.invoiceNumber} اترفعت قبل كده في ${input.duplicateInvoice.uploadedAt}، ومش هيتضاف عليها نقاط تاني.`);
+    return block(`الفاتورة دي اتضافت قبل كده في ${input.duplicateInvoice.uploadedAt}، ومش هيتضاف عليها نقاط تاني.`);
   }
 
   if (!input.analysis.invoiceNumber || !input.analysis.invoiceNumberTrusted) {
-    return block('رقم الفاتورة مش واضح. صوّرها تاني وخلّي رقم الفاتورة ظاهر.');
+    return block('الفاتورة دي مش من فورتو أو بابل، ومش هيتضاف عليها نقاط.');
   }
 
   if (input.analysis.paid != null && input.analysis.net != null
@@ -56,16 +56,16 @@ export function reviewInvoiceReading(input: {
     return block('المبلغ المدفوع والصافي مش متطابقين. صوّر الفاتورة تاني بوضوح.');
   }
 
-  const amountAllowed = input.analysis.amountSource === 'paid'
-    || input.analysis.amountSource === 'net'
-    || (input.analysis.amountSource === 'total' && (input.analysis.discount == null || input.analysis.discount <= 0));
-
-  if (!amountAllowed) {
-    return block('لازم المبلغ المدفوع يكون واضح. مش هيتضاف نقاط على مبلغ متلخبط أو قبل الخصم.');
+  if (input.analysis.amountSource !== 'paid' && input.analysis.amountSource !== 'net') {
+    return block('لازم المبلغ المدفوع يكون واضح. مش هيتضاف نقاط على الإجمالي قبل الضريبة.');
   }
 
   const invoiceDay = parseInvoiceDay(input.analysis.invoiceDate);
-  if (invoiceDay && !sameDay(invoiceDay, input.now)) {
+  if (!invoiceDay) {
+    return block('تاريخ الفاتورة مش واضح. صوّرها تاني وخلي تاريخ النهاردة ظاهر.');
+  }
+
+  if (!sameDay(invoiceDay, input.now)) {
     return block(`الفاتورة بتاريخ ${input.analysis.invoiceDate} مش فاتورة النهاردة، ومش هيتضاف عليها نقاط.`);
   }
 

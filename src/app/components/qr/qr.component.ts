@@ -1,8 +1,8 @@
-import { Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { ApiService } from '../../services/api.service';
 import { parseCustomerQr, type CustomerQrProfile } from '../../services/customer-qr';
 import { fingerprintImage, reviewCapture, reviewInvoiceReading } from '../../services/invoice-guard';
-import { calculateInvoicePoints } from '../../services/invoice-parser';
+import { calculateInvoicePoints, parseInvoiceText } from '../../services/invoice-parser';
 import { InvoiceAiService, type InvoiceAnalysis } from '../../services/invoice-ai.service';
 import { formatDateTimeToSecond, UsedInvoicesService } from '../../services/used-invoices.service';
 import Swal from 'sweetalert2';
@@ -16,9 +16,16 @@ import jsQR from 'jsqr';
 export class QrComponent implements OnDestroy {
   @ViewChild('video') videoElement!: ElementRef<HTMLVideoElement>;
   @ViewChild('invoiceVideo') invoiceVideo?: ElementRef<HTMLVideoElement>;
+  @ViewChild('phoneCamera') phoneCamera?: ElementRef<HTMLInputElement>;
+
+  readonly frameWidth = 86;
+  readonly frameHeight = 90;
 
   isScanning = false;
   isCapturingInvoice = false;
+  cameraReady = false;
+  torchAvailable = false;
+  torchOn = false;
   currentCode = '';
   customer: CustomerQrProfile | null = null;
   stream: MediaStream | null = null;
@@ -38,9 +45,14 @@ export class QrComponent implements OnDestroy {
   constructor(
     private apiService: ApiService,
     private invoiceAi: InvoiceAiService,
-    private usedInvoices: UsedInvoicesService
+    private usedInvoices: UsedInvoicesService,
+    private changeDetector: ChangeDetectorRef
   ) {
     this.invoiceAi.warmup();
+  }
+
+  get phoneCameraPreferred(): boolean {
+    return window.matchMedia('(pointer: coarse)').matches;
   }
 
   get customerScanned(): boolean {
@@ -136,44 +148,63 @@ export class QrComponent implements OnDestroy {
 
     this.stopCamera();
     this.analyzeError = null;
+    this.cameraReady = false;
+    this.torchOn = false;
+    this.torchAvailable = false;
     this.isCapturingInvoice = true;
+    this.changeDetector.detectChanges();
+
+    const video = this.invoiceVideo?.nativeElement;
+    if (!video) {
+      await this.failInvoiceCamera();
+      return;
+    }
+
+    video.muted = true;
+    video.defaultMuted = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
 
     try {
       this.stream = await this.openCameraStream();
-      const video = await this.waitForInvoiceVideo();
       video.srcObject = this.stream;
-      video.setAttribute('playsinline', 'true');
-      await video.play();
+      const playback = video.play();
+      if (playback) {
+        await playback.catch(() => undefined);
+      }
+      await this.waitForFrame(video);
+      await this.tuneCamera(this.stream);
+      this.cameraReady = true;
     } catch {
-      this.stopCamera();
-      this.isCapturingInvoice = false;
-      Swal.fire('خطأ', 'تعذر فتح الكاميرا لتصوير الفاتورة', 'error');
+      await this.failInvoiceCamera();
     }
   }
 
   async captureInvoicePhoto() {
     const video = this.invoiceVideo?.nativeElement;
-    if (!video?.videoWidth) {
+    if (!this.cameraReady || !video?.videoWidth) {
+      this.analyzeError = 'استنى لحد ما صورة الفاتورة توضح في الإطار، وبعدين صور.';
       return;
     }
 
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const canvas = framedSnapshot(video, this.frameWidth / 100, this.frameHeight / 100);
     const ctx = canvas.getContext('2d');
-    if (!ctx) {
+    if (!ctx || !canvas.width) {
+      this.analyzeError = 'تعذر التقاط صورة الفاتورة. حاول تاني.';
       return;
     }
-
-    ctx.drawImage(video, 0, 0);
-    this.stopCamera();
-    this.isCapturingInvoice = false;
 
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
     if (!blob) {
-      this.analyzeError = 'تعذر التقاط صورة الفاتورة';
+      this.analyzeError = 'تعذر التقاط صورة الفاتورة. حاول تاني.';
       return;
     }
+
+    this.stopCamera();
+    this.isCapturingInvoice = false;
+    this.cameraReady = false;
 
     const file = new File([blob], `invoice-${Date.now()}.jpg`, {
       type: 'image/jpeg',
@@ -182,14 +213,89 @@ export class QrComponent implements OnDestroy {
     await this.onInvoiceSelected(file);
   }
 
+  photographInvoice() {
+    if (this.phoneCameraPreferred) {
+      this.openPhoneCamera();
+      return;
+    }
+
+    void this.startInvoiceCamera();
+  }
+
+  openPhoneCamera() {
+    if (this.isAnalyzing || this.isSubmitting) {
+      return;
+    }
+
+    this.stopCamera();
+    this.isCapturingInvoice = false;
+    this.cameraReady = false;
+    this.phoneCamera?.nativeElement.click();
+  }
+
+  async onPhoneCameraPhoto(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) {
+      return;
+    }
+
+    const photo = new File([file], file.name || `invoice-${Date.now()}.jpg`, {
+      type: file.type.startsWith('image/') ? file.type : 'image/jpeg',
+      lastModified: file.lastModified || Date.now()
+    });
+    await this.onInvoiceSelected(photo);
+  }
+
+  async toggleTorch() {
+    const track = this.stream?.getVideoTracks()[0];
+    if (!track) {
+      return;
+    }
+
+    const next = !this.torchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
+      this.torchOn = next;
+    } catch {
+      this.torchOn = false;
+    }
+  }
+
+  async focusInvoice(event: MouseEvent) {
+    const video = this.invoiceVideo?.nativeElement;
+    const track = this.stream?.getVideoTracks()[0];
+    if (!video || !track || !this.cameraReady) {
+      return;
+    }
+
+    const rect = video.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return;
+    }
+
+    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    try {
+      await track.applyConstraints({
+        advanced: [{ pointsOfInterest: [{ x, y }] } as MediaTrackConstraintSet]
+      });
+    } catch {
+      return;
+    }
+  }
+
   cancelInvoiceCamera() {
     this.stopCamera();
     this.isCapturingInvoice = false;
+    this.cameraReady = false;
+    this.torchOn = false;
   }
 
   retakeInvoice() {
     this.resetInvoice();
-    void this.startInvoiceCamera();
+    this.photographInvoice();
   }
 
   async onInvoiceSelected(file: File) {
@@ -243,14 +349,14 @@ export class QrComponent implements OnDestroy {
     this.analyzeProgress = 0;
 
     try {
-      this.analysis = await this.invoiceAi.analyzeInvoice(this.invoicePreview, (progress) => {
+      const text = await this.invoiceAi.recognizeText(this.invoicePreview, (progress) => {
         this.analyzeStatus = progress.status;
         this.analyzeProgress = progress.progress;
       });
-
+      this.analysis = parseInvoiceText(text);
       const review = reviewInvoiceReading({
         analysis: this.analysis,
-        duplicateInvoice: this.usedInvoices.findDuplicate(this.analysis.invoiceNumber),
+        duplicateInvoice: this.usedInvoices.findDuplicate(this.analysis.invoiceNumber, this.analysis.invoiceTotal),
         duplicateImage: this.usedInvoices.findDuplicateImage(this.imageHash),
         now: new Date()
       });
@@ -294,7 +400,7 @@ export class QrComponent implements OnDestroy {
     const analysis = this.analysis;
     const review = reviewInvoiceReading({
       analysis,
-      duplicateInvoice: this.usedInvoices.findDuplicate(analysis.invoiceNumber),
+      duplicateInvoice: this.usedInvoices.findDuplicate(analysis.invoiceNumber, analysis.invoiceTotal),
       duplicateImage: this.usedInvoices.findDuplicateImage(this.imageHash),
       now: new Date()
     });
@@ -311,6 +417,15 @@ export class QrComponent implements OnDestroy {
     const publicCode = this.currentCode;
     const imageHash = this.imageHash || undefined;
     this.isSubmitting = true;
+    this.usedInvoices.reserve({
+      invoiceNumber,
+      imageAddedAt,
+      uploadedAt,
+      total: invoiceTotal,
+      points: pointsToAdd,
+      newBalance: null,
+      imageHash
+    });
 
     Swal.fire({
       title: 'جاري حفظ النقاط...',
@@ -330,33 +445,45 @@ export class QrComponent implements OnDestroy {
       next: (res) => {
         Swal.close();
 
-        if (res && res.success === true) {
+        const added = finiteNumber(res?.pointsAdded);
+        const balance = finiteNumber(res?.newBalance);
+        const credited = res?.success === true
+          && added != null
+          && added > 0
+          && balance != null;
+
+        if (credited) {
           this.usedInvoices.markUsed({
             invoiceNumber,
             imageAddedAt,
             uploadedAt,
             total: invoiceTotal,
-            points: pointsToAdd,
+            points: added,
+            newBalance: balance,
             imageHash
           });
 
           this.resetAll();
           Swal.fire({
-            title: 'نجاح',
-            text: res.message || `تم إضافة ${pointsToAdd} نقطة من فاتورة ${invoiceTotal} ج.م ✅`,
+            title: 'النقاط اتضافت',
+            text: `اتضاف ${added} نقطة. رصيد العميل بقى ${balance} نقطة.`,
             icon: 'success'
           });
         } else {
+          this.usedInvoices.releasePending(invoiceNumber);
           this.isSubmitting = false;
           Swal.fire({
-            title: 'فشل الإضافة',
-            text: res.message || 'عفواً، هذا الكود غير صالح أو تم استخدامه ❌',
+            title: res?.success === true ? 'الرصيد مرجعش' : 'فشل الإضافة',
+            text: res?.success === true
+              ? 'السيرفر موافقش يرجع النقاط المضافة والرصيد الجديد، فالفاتورة متسجلتش كمقروءة. لو رصيد العميل متغيرش، اضغط تأكيد تاني.'
+              : (res?.message || 'عفواً، هذا الكود غير صالح أو تم استخدامه ❌'),
             icon: 'error'
           });
         }
       },
       error: (err) => {
         Swal.close();
+        this.usedInvoices.releasePending(invoiceNumber);
         this.isSubmitting = false;
         console.error('API Error:', err);
         Swal.fire({
@@ -373,36 +500,96 @@ export class QrComponent implements OnDestroy {
   }
 
   private async openCameraStream(): Promise<MediaStream> {
-    try {
-      return await navigator.mediaDevices.getUserMedia({
+    const attempts: MediaStreamConstraints[] = [
+      {
+        audio: false,
+        video: {
+          facingMode: { exact: 'environment' },
+          width: { ideal: 2160 },
+          height: { ideal: 3840 }
+        }
+      },
+      {
+        audio: false,
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 1920 },
-          height: { ideal: 1080 }
+          height: { ideal: 2560 }
         }
-      });
-    } catch {
-      return navigator.mediaDevices.getUserMedia({ video: true });
+      },
+      { audio: false, video: { facingMode: 'environment' } },
+      { audio: false, video: true }
+    ];
+
+    let lastError: unknown;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        lastError = error;
+      }
     }
+
+    throw lastError instanceof Error ? lastError : new Error('تعذر فتح الكاميرا');
   }
 
-  private waitForInvoiceVideo(): Promise<HTMLVideoElement> {
+  private waitForFrame(video: HTMLVideoElement): Promise<void> {
     return new Promise((resolve, reject) => {
       const started = Date.now();
       const check = () => {
-        const video = this.invoiceVideo?.nativeElement;
-        if (video) {
-          resolve(video);
+        if (video.videoWidth > 0 && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          resolve();
           return;
         }
-        if (Date.now() - started > 2000) {
-          reject(new Error('تعذر فتح الكاميرا'));
+        if (Date.now() - started > 6000) {
+          reject(new Error('الكاميرا فتحت بس الصورة مش ظاهرة'));
           return;
         }
         requestAnimationFrame(check);
       };
       check();
     });
+  }
+
+  private async tuneCamera(stream: MediaStream): Promise<void> {
+    const track = stream.getVideoTracks()[0];
+    if (!track?.getCapabilities) {
+      return;
+    }
+
+    const capabilities = track.getCapabilities() as MediaTrackCapabilities & {
+      torch?: boolean;
+      focusMode?: string[];
+    };
+    this.torchAvailable = !!capabilities.torch;
+    if (!capabilities.focusMode?.includes('continuous')) {
+      return;
+    }
+
+    try {
+      await track.applyConstraints({
+        advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet]
+      });
+    } catch {
+      return;
+    }
+  }
+
+  private async failInvoiceCamera(): Promise<void> {
+    this.stopCamera();
+    this.isCapturingInvoice = false;
+    this.cameraReady = false;
+    const result = await Swal.fire({
+      title: 'الكاميرا متفتحتش',
+      text: 'افتح كاميرا الموبايل وصوّر الفاتورة من قريب، والورقة كلها ظاهرة.',
+      icon: 'warning',
+      confirmButtonText: 'فتح كاميرا الموبايل',
+      showCancelButton: true,
+      cancelButtonText: 'إلغاء'
+    });
+    if (result.isConfirmed) {
+      this.openPhoneCamera();
+    }
   }
 
   private readFileAsDataUrl(file: File): Promise<string> {
@@ -413,4 +600,55 @@ export class QrComponent implements OnDestroy {
       reader.readAsDataURL(file);
     });
   }
+}
+
+function framedSnapshot(video: HTMLVideoElement, frameWidth: number, frameHeight: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  if (!sourceWidth || !sourceHeight) {
+    return canvas;
+  }
+
+  const boxWidth = video.clientWidth || sourceWidth;
+  const boxHeight = video.clientHeight || sourceHeight;
+  const sourceRatio = sourceWidth / sourceHeight;
+  const boxRatio = boxWidth / boxHeight;
+  let sx = 0;
+  let sy = 0;
+  let sw = sourceWidth;
+  let sh = sourceHeight;
+
+  if (sourceRatio > boxRatio) {
+    sw = sourceHeight * boxRatio;
+    sx = (sourceWidth - sw) / 2;
+  } else {
+    sh = sourceWidth / boxRatio;
+    sy = (sourceHeight - sh) / 2;
+  }
+
+  const cropWidth = sw * frameWidth;
+  const cropHeight = sh * frameHeight;
+  sx += (sw - cropWidth) / 2;
+  sy += (sh - cropHeight) / 2;
+
+  const maxEdge = 2400;
+  const scale = Math.min(1, maxEdge / Math.max(cropWidth, cropHeight));
+  canvas.width = Math.max(1, Math.round(cropWidth * scale));
+  canvas.height = Math.max(1, Math.round(cropHeight * scale));
+  canvas.getContext('2d')?.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
 }

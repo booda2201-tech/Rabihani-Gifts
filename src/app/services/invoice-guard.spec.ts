@@ -4,7 +4,9 @@ import { reviewCapture, reviewInvoiceReading } from './invoice-guard';
 const NOW = new Date(2026, 9, 21, 11, 0, 0);
 
 const CLEAR_RECEIPT = `
-Invoice No. FO18898120878790 رقم الفاتورة
+PORTO مغسله
+Invoice No. FO1907512037141 رقم الفاتورة
+732
 Date 21-Oct-2026
 Total Amount 100.00 الإجمالي
 Discount 0.00 الخصم
@@ -41,7 +43,7 @@ describe('invoice fraud guard', () => {
       duplicateInvoice: prior,
       duplicateImage: null,
       now: NOW
-    }).reason).toContain('FO18898120878790');
+    }).reason).toContain('اتضافت قبل كده');
 
     expect(reviewInvoiceReading({
       analysis,
@@ -67,6 +69,22 @@ describe('invoice fraud guard', () => {
     expect(review.reason).toContain('مش متطابقين');
   });
 
+  it('rejects an invoice from another place', () => {
+    const foreign = parseInvoiceText(`
+      Invoice No. INV-5521
+      Date 21-Oct-2026
+      Total 120.00
+      Paid 120.00
+    `);
+
+    expect(reviewInvoiceReading({
+      analysis: foreign,
+      duplicateInvoice: null,
+      duplicateImage: null,
+      now: NOW
+    }).reason).toContain('مش من فورتو أو بابل');
+  });
+
   it('rejects a guessed amount and an invoice from another day', () => {
     const guessed = parseInvoiceText('random line 999.99');
     expect(reviewInvoiceReading({
@@ -87,7 +105,9 @@ describe('invoice fraud guard', () => {
 
   it('rejects points calculated from the gross total when a discount exists', () => {
     const analysis = parseInvoiceText(`
-      Invoice No. FO18898120878790
+      PORTO
+      Invoice No. FO1907512037141 رقم الفاتورة
+      732
       Total Amount 350.88 الإجمالي
       Discount 307.01 الخصم
     `);
@@ -98,6 +118,6 @@ describe('invoice fraud guard', () => {
       duplicateInvoice: null,
       duplicateImage: null,
       now: NOW
-    }).reason).toContain('قبل الخصم');
+    }).reason).toContain('المبلغ المدفوع');
   });
 });
