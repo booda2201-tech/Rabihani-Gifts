@@ -5,7 +5,7 @@
     </div>
 
     <h1>إضافة النقاط</h1>
-    <p class="subtitle">امسح كود العميل من الابلكيشن، وبعدها صوّر الفاتورة عشان النقاط تتحسب من الإجمالي</p>
+    <p class="subtitle">امسح كود العميل، وبعدين صوّر فاتورة فورتو أو بابل مرة واحدة</p>
 
     <div class="steps">
       <div class="step" [class.active]="!customerScanned" [class.done]="customerScanned">
@@ -51,7 +51,7 @@
       </div>
 
       <div class="invoice-actions" *ngIf="!invoicePreview && !isCapturingInvoice">
-        <p class="capture-hint">صورة واحدة. قرّب الموبايل لحد ما الورقة تملا الصورة.</p>
+        <p class="capture-hint">صورة واحدة للورقة كلها. مش محتاج تقرّب أكتر من كده.</p>
         <button type="button" class="btn-camera" (click)="photographInvoice()" [disabled]="isAnalyzing || isSubmitting">
           <i class="bi bi-camera-fill"></i> تصوير الفاتورة
         </button>
@@ -83,7 +83,7 @@
 
       <div class="invoice-preview-wrap" *ngIf="invoicePreview">
         <img [src]="invoicePreview" alt="صورة الفاتورة" />
-        <p class="capture-hint">لو الأرقام مش واضحة، صور الفاتورة تاني من قريب.</p>
+        <p class="capture-hint">لو القراءة فشلت، صوّر تاني في إضاءة كويسة من غير ما تبعد أو تلزق زيادة.</p>
         <button type="button" class="btn-retake" (click)="retakeInvoice()" [disabled]="isAnalyzing || isSubmitting">
           <i class="bi bi-arrow-repeat"></i> إعادة تصوير الفاتورة
         </button>

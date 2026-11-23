@@ -1,4 +1,4 @@
-import { calculateInvoicePoints, type InvoiceParseResult } from './invoice-parser';
+import { calculateInvoicePoints, isOurStore, type InvoiceParseResult } from './invoice-parser';
 
 export const MAX_CAPTURE_AGE_MS = 10 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
@@ -43,11 +43,17 @@ export function reviewInvoiceReading(input: {
     return block(`الصورة دي اتسجلت قبل كده في ${input.duplicateImage.uploadedAt}، ومش هيتضاف عليها نقاط تاني.`);
   }
 
-  if (input.duplicateInvoice && input.analysis.invoiceNumber) {
+  if (input.duplicateInvoice) {
     return block(`الفاتورة دي اتضافت قبل كده في ${input.duplicateInvoice.uploadedAt}، ومش هيتضاف عليها نقاط تاني.`);
   }
 
   if (!input.analysis.invoiceNumber || !input.analysis.invoiceNumberTrusted) {
+    if (isOurStore(input.analysis.rawText)
+      || input.analysis.amountSource === 'paid'
+      || input.analysis.amountSource === 'net') {
+      return block('رقم الفاتورة مش واضح. صوّرها تاني من قريب وخلي رقم الفاتورة ظاهر.');
+    }
+
     return block('الفاتورة دي مش من فورتو أو بابل، ومش هيتضاف عليها نقاط.');
   }
 

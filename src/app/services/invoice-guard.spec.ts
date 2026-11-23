@@ -53,6 +53,23 @@ describe('invoice fraud guard', () => {
     }).reason).toContain('الصورة دي اتسجلت');
   });
 
+  it('says already added when a second photo loses the invoice number', () => {
+    const blurry = parseInvoiceText(`
+      Date 21-Oct-2026
+      Total Amount 100.00
+      Net 100.00
+      Paid 100.00
+    `);
+    const prior = { uploadedAt: '2026-10-21 10:55:00' };
+
+    expect(reviewInvoiceReading({
+      analysis: blurry,
+      duplicateInvoice: prior,
+      duplicateImage: null,
+      now: NOW
+    }).reason).toContain('اتضافت قبل كده');
+  });
+
   it('rejects a paid amount that does not match the net', () => {
     const analysis = parseInvoiceText(CLEAR_RECEIPT);
     analysis.paid = 500;

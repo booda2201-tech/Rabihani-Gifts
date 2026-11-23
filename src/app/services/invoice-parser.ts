@@ -25,9 +25,9 @@ const FIELD_PATTERNS: Record<
 > = {
   totalAmount: /ا?ل?اجمل[يى]|ا?ل?إ?جمال[يى]|total\s*amount|fotalal|totalamount|tote\s*amount|otal\s*amount/i,
   discount: /الخصم|discount|discorint/i,
-  tax: /الضريبة|الضريبه|\btax\b|\blax\b|faxax|taxax/i,
-  net: /الصافي|الصافى|\bnet\b|netet|vetet|fact/i,
-  paid: /المدفوع|المنقوع|paidid|\bpaid\b/i
+  tax: /الضريبة|الضريبه|\btax\b|\bfax\b|\blax\b|faxax|taxax/i,
+  net: /الصافي|الصافى|\bnet\b|netet|vetet|fact|\bvet\b/i,
+  paid: /المدفوع|المنقوع|paidid|\bpaid\b|\bpald\b|pa\s*id/i
 };
 
 const MONEY_RE = /(\d{1,7}[.,]\d{2,4})/g;
@@ -80,6 +80,13 @@ export function parseInvoiceText(text: string): InvoiceParseResult {
     }
   }
 
+  // Forto/Bubble: Net/Paid = Total Amount + Tax when OCR misses the paid line.
+  if (found.paid == null && found.net == null
+    && found.totalAmount != null && found.tax != null
+    && found.totalAmount > 0 && found.tax > 0) {
+    found.net = roundMoney(found.totalAmount + found.tax);
+  }
+
   const invoiceTotal = found.paid ?? found.net ?? found.totalAmount;
   const amountSource = found.paid != null
     ? 'paid'
@@ -105,6 +112,10 @@ export function parseInvoiceText(text: string): InvoiceParseResult {
     confidence: matchedFields >= 2 ? 'high' : matchedFields === 1 ? 'medium' : 'low',
     rawText: text
   };
+}
+
+function roundMoney(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function normalizeInvoiceText(text: string): string {
@@ -136,35 +147,156 @@ function pickLineAmount(amounts: number[]): number {
 }
 
 function extractInvoiceNumber(text: string): { value: string | null; trusted: boolean } {
-  const porto = extractPortoInvoiceNumber(text);
-  return { value: porto, trusted: porto != null };
+  const value = findBranchInvoiceNumber(text);
+  if (!value) {
+    return { value: null, trusted: false };
+  }
+
+  // Forto/Bubble share one POS number shape. Brand logos often fail OCR, so the
+  // number itself is the identity; store words are a bonus, not a hard gate.
+  return { value, trusted: true };
 }
 
-function extractPortoInvoiceNumber(text: string): string | null {
+function findBranchInvoiceNumber(text: string): string | null {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]
-      .replace(/([A-Za-z])\s+(?=\d)/g, '$1')
-      .replace(/(\d)\s+(?=\d)/g, '$1');
-    if (!/invoice|nvoice|فاتور/i.test(line)) {
+    const line = compactInvoiceLine(lines[index]);
+    const labeled = /invoice|nvoice|inv[o0]ice|فاتور|\bno\b/i.test(line);
+    if (!labeled) {
       continue;
     }
 
-    const match = line.match(/([A-Z]{2})(\d{13})\b/i);
-    const continuation = lines[index + 1]?.replace(/\s/g, '') ?? '';
-    if (!match || !/^\d{3}$/.test(continuation) || !isOurStore(text)) {
-      continue;
+    const onLabel = parseBranchInvoiceNumber(line, lines[index + 1] ?? '');
+    if (onLabel) {
+      return onLabel;
     }
 
-    return `${match[1].toUpperCase()}${match[2]}${continuation}`;
+    const onNext = parseBranchInvoiceNumber(
+      compactInvoiceLine(lines[index + 1] ?? ''),
+      lines[index + 2] ?? ''
+    );
+    if (onNext) {
+      return onNext;
+    }
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const parsed = parseBranchInvoiceNumber(
+      compactInvoiceLine(lines[index]),
+      lines[index + 1] ?? ''
+    );
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return findBranchInvoiceNumberLoose(text);
+}
+
+function findBranchInvoiceNumberLoose(text: string): string | null {
+  const compact = text
+    .toUpperCase()
+    .replace(/[^A-Z0-9\n]/g, '')
+    .replace(/O/g, '0')
+    .replace(/Q/g, '0')
+    .replace(/I/g, '1')
+    .replace(/L/g, '1')
+    .replace(/S/g, '5')
+    .replace(/B/g, '8')
+    .replace(/Z/g, '2');
+
+  const glued = compact.match(/([A-Z][A-Z0-9])([0-9]{16})/);
+  if (glued) {
+    return formatInvoiceNumber(glued[1], glued[2].slice(0, 13), glued[2].slice(13));
+  }
+
+  const wrapped = compact.match(/([A-Z][A-Z0-9])([0-9]{12,13})\n([0-9]{3,4})/);
+  if (wrapped) {
+    return assembleInvoiceNumber(wrapped[1], wrapped[2], wrapped[3]);
   }
 
   return null;
 }
 
-function isOurStore(text: string): boolean {
-  return /porto|forto|فورت|بورت|مغسل|bubble|بابل|زول/i.test(text);
+function parseBranchInvoiceNumber(line: string, nextLine: string): string | null {
+  if (!line) {
+    return null;
+  }
+
+  const glued = line.match(/([A-Z][A-Z0-9])([0-9OQILSBZ]{16})\b/i);
+  if (glued) {
+    return formatInvoiceNumber(glued[1], glued[2].slice(0, 13), glued[2].slice(13));
+  }
+
+  const sameLine = line.match(/([A-Z][A-Z0-9])([0-9OQILSBZ]{13})([0-9OQILSBZ]{3})\b/i);
+  if (sameLine) {
+    return formatInvoiceNumber(sameLine[1], sameLine[2], sameLine[3]);
+  }
+
+  const spaced = line.match(/([A-Z][A-Z0-9])([0-9OQILSBZ]{12,13})\s+([0-9OQILSBZ]{3,4})\b/i);
+  if (spaced) {
+    return assembleInvoiceNumber(spaced[1], spaced[2], spaced[3]);
+  }
+
+  const head = line.match(/([A-Z][A-Z0-9])([0-9OQILSBZ]{12,13})\b/i);
+  const continuation = normalizeDigitRun(nextLine.replace(/\s/g, ''));
+  if (head && /^\d{3,4}$/.test(continuation)) {
+    return assembleInvoiceNumber(head[1], head[2], continuation);
+  }
+
+  return null;
+}
+
+function assembleInvoiceNumber(prefix: string, body: string, tail: string): string | null {
+  const digits = normalizeDigitRun(`${body}${tail}`);
+  if (digits.length !== 16) {
+    return null;
+  }
+
+  return formatInvoiceNumber(prefix, digits.slice(0, 13), digits.slice(13));
+}
+
+export function isOurStore(text: string): boolean {
+  return /porto|forto|fourto|فورت|بورت|مغسل|bubble|bobble|bubbl|بابل|زول|زويل|hope|zweil|zoweil|hendal|هندال/i.test(text)
+    || (
+      /invoice|nvoice|inv[o0]ice/i.test(text)
+      && /paid|paidid|المدفوع/i.test(text)
+      && /net|vetet|الصافي/i.test(text)
+      && /tax|fax|lax|total\s*amount|الاجمال|الإجمال/i.test(text)
+    );
+}
+
+function compactInvoiceLine(line: string): string {
+  return line
+    .replace(/([A-Za-z])\s+(?=[A-Za-z0-9])/g, '$1')
+    .replace(/([0-9OQILSBZ])\s+(?=[0-9OQILSBZ])/gi, '$1');
+}
+
+function formatInvoiceNumber(prefix: string, body: string, tail: string): string {
+  return `${normalizeBranchCode(prefix)}${normalizeDigitRun(body)}${normalizeDigitRun(tail)}`;
+}
+
+function normalizeBranchCode(value: string): string {
+  return value
+    .toUpperCase()
+    .replace(/0/g, 'O')
+    .replace(/1/g, 'I')
+    .replace(/5/g, 'S')
+    .replace(/8/g, 'B')
+    .replace(/2/g, 'Z');
+}
+
+function normalizeDigitRun(value: string): string {
+  return value
+    .toUpperCase()
+    .replace(/O/g, '0')
+    .replace(/Q/g, '0')
+    .replace(/I/g, '1')
+    .replace(/L/g, '1')
+    .replace(/S/g, '5')
+    .replace(/B/g, '8')
+    .replace(/Z/g, '2');
 }
 
 function extractInvoiceDate(text: string): string | null {

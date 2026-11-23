@@ -42,18 +42,79 @@ export class InvoiceAiService implements OnDestroy {
     void this.getWorker().catch(() => undefined);
   }
 
-  recognizeText(
+  /**
+   * Reads a normal phone photo of the whole receipt.
+   * Uses header+totals first; only retries a close header crop if the invoice number is missing.
+   */
+  async recognizeText(
     image: string,
     onProgress?: (progress: InvoiceProgress) => void
   ): Promise<string> {
-    return this.readImageText(image, onProgress);
+    this.progressListener = onProgress || null;
+    onProgress?.({ status: 'جاري تجهيز صورة الفاتورة...', progress: 8 });
+
+    const img = await loadImage(image);
+    const worker = await this.getWorker();
+    const mainPage = this.receiptCanvas(img);
+    if (!mainPage) {
+      throw new Error('تعذر تجهيز صورة الفاتورة');
+    }
+
+    this.recognizeFloor = 18;
+    this.recognizeSpan = 55;
+    onProgress?.({ status: 'جاري قراءة الفاتورة...', progress: 18 });
+    const main = await worker.recognize(mainPage);
+    let text = main.data?.text || '';
+    let parsed = parseInvoiceText(text);
+
+    if (!parsed.invoiceNumberTrusted) {
+      const headerPage = this.headerCanvas(img);
+      if (headerPage) {
+        this.recognizeFloor = 72;
+        this.recognizeSpan = 12;
+        onProgress?.({ status: 'جاري توضيح رقم الفاتورة...', progress: 74 });
+        text = `${text}\n${await this.recognizeWithMode(worker, headerPage, '4')}`;
+        parsed = parseInvoiceText(text);
+      }
+    }
+
+    if (parsed.amountSource !== 'paid' && parsed.amountSource !== 'net') {
+      const totalsPage = this.totalsCanvas(img);
+      if (totalsPage) {
+        this.recognizeFloor = 86;
+        this.recognizeSpan = 10;
+        onProgress?.({ status: 'جاري توضيح المدفوع...', progress: 88 });
+        text = `${text}\n${await this.recognizeWithMode(worker, totalsPage, '6')}`;
+      }
+    }
+
+    return text;
+  }
+
+  private async recognizeWithMode(
+    worker: TesseractWorker,
+    page: HTMLCanvasElement,
+    mode: string
+  ): Promise<string> {
+    try {
+      await worker.setParameters({ tessedit_pageseg_mode: mode });
+    } catch {
+      // optional
+    }
+    const { data } = await worker.recognize(page);
+    try {
+      await worker.setParameters({ tessedit_pageseg_mode: '6' });
+    } catch {
+      // optional
+    }
+    return data?.text || '';
   }
 
   async analyzeInvoice(
     image: string,
     onProgress?: (progress: InvoiceProgress) => void
   ): Promise<InvoiceAnalysis> {
-    const text = await this.readImageText(image, onProgress);
+    const text = await this.recognizeText(image, onProgress);
     onProgress?.({ status: 'جاري استخراج إجمالي الفاتورة...', progress: 95 });
 
     const analysis = parseInvoiceText(text);
@@ -67,27 +128,6 @@ export class InvoiceAiService implements OnDestroy {
 
   ngOnDestroy(): void {
     void this.terminateWorker();
-  }
-
-  private async readImageText(
-    image: string,
-    onProgress?: (progress: InvoiceProgress) => void
-  ): Promise<string> {
-    this.progressListener = onProgress || null;
-    onProgress?.({ status: 'جاري تجهيز صورة الفاتورة...', progress: 8 });
-    const pages = await this.preparePages(image);
-    const worker = await this.getWorker();
-    let text = '';
-
-    for (let index = 0; index < pages.length; index += 1) {
-      this.recognizeFloor = 18 + (index / pages.length) * 72;
-      this.recognizeSpan = 72 / pages.length;
-      onProgress?.({ status: 'جاري قراءة الفاتورة...', progress: Math.round(this.recognizeFloor) });
-      const { data } = await worker.recognize(pages[index]);
-      text += `\n${data?.text || ''}`;
-    }
-
-    return text;
   }
 
   private getWorker(): Promise<TesseractWorker> {
@@ -125,7 +165,7 @@ export class InvoiceAiService implements OnDestroy {
 
   private async bootWorker(corePath: string): Promise<TesseractWorker> {
     const Tesseract = await this.loadTesseract();
-    const worker = await Tesseract.createWorker('ara+eng', 1, {
+    const worker = await Tesseract.createWorker('eng', 1, {
       logger: (message) => this.handleWorkerLog(message),
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
       corePath,
@@ -137,9 +177,9 @@ export class InvoiceAiService implements OnDestroy {
 
     try {
       await worker.setParameters({
-        tessedit_pageseg_mode: '4',
+        tessedit_pageseg_mode: '6',
         classify_enable_learning: '0',
-        user_defined_dpi: '300'
+        user_defined_dpi: '220'
       });
     } catch {
       // Reading still works if the runtime rejects optional parameters.
@@ -201,46 +241,105 @@ export class InvoiceAiService implements OnDestroy {
     }
   }
 
-  private preparePages(image: string): Promise<HTMLCanvasElement[]> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const bands = img.height > img.width
-          ? [{ y: 0, height: 0.55 }, { y: 0.45, height: 0.55 }]
-          : [{ y: 0, height: 1 }];
-        const pages: HTMLCanvasElement[] = [];
+  private receiptCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
+    const tall = img.height > img.width * 1.25;
+    const maxWidth = 1400;
 
-        for (const band of bands) {
-          const page = this.bandCanvas(img, band.y, band.height);
-          if (!page) {
-            reject(new Error('تعذر تجهيز صورة الفاتورة'));
-            return;
-          }
-          pages.push(page);
-        }
+    if (!tall) {
+      return this.drawBand(img, 0, img.height, Math.min(1, maxWidth / img.width, 2000 / img.height));
+    }
 
-        resolve(pages);
-      };
-      img.onerror = () => reject(new Error('تعذر فتح صورة الفاتورة'));
-      img.src = image;
-    });
-  }
-
-  private bandCanvas(img: HTMLImageElement, yRatio: number, heightRatio: number): HTMLCanvasElement | null {
-    const sy = Math.round(img.height * yRatio);
-    const sourceHeight = Math.min(img.height - sy, Math.max(1, Math.round(img.height * heightRatio)));
-    const scale = Math.min(1, 1800 / img.width, 2200 / sourceHeight);
+    // Skip the QR/footer at the very bottom; Paid/Net sit above it on Forto/Bubble paper.
+    const topHeight = Math.round(img.height * 0.4);
+    const totalsY = Math.round(img.height * 0.46);
+    const totalsHeight = Math.round(img.height * 0.4);
+    const gap = 20;
+    const scale = Math.min(1, maxWidth / img.width);
+    const width = Math.max(1, Math.round(img.width * scale));
+    const topDraw = Math.max(1, Math.round(topHeight * scale));
+    const totalsDraw = Math.max(1, Math.round(totalsHeight * scale));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(img.width * scale));
-    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
-
-    const ctx = canvas.getContext('2d');
+    canvas.width = width;
+    canvas.height = topDraw + gap + totalsDraw;
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) {
       return null;
     }
 
-    ctx.filter = 'grayscale(1) contrast(1.35) brightness(1.08)';
-    ctx.drawImage(img, 0, sy, img.width, sourceHeight, 0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.drawEnhanced(ctx, img, 0, 0, img.width, topHeight, 0, 0, width, topDraw);
+    this.drawEnhanced(
+      ctx,
+      img,
+      0,
+      totalsY,
+      img.width,
+      totalsHeight,
+      0,
+      topDraw + gap,
+      width,
+      totalsDraw
+    );
     return canvas;
   }
+
+  private headerCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
+    const topHeight = Math.round(img.height * Math.min(0.5, img.height > img.width ? 0.45 : 0.55));
+    const scale = Math.min(2, 1600 / img.width);
+    return this.drawBand(img, 0, topHeight, scale);
+  }
+
+  private totalsCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
+    const y = Math.round(img.height * 0.45);
+    const height = Math.round(img.height * 0.42);
+    const scale = Math.min(2, 1600 / img.width);
+    return this.drawBand(img, y, height, scale);
+  }
+
+  private drawBand(
+    img: HTMLImageElement,
+    sy: number,
+    sourceHeight: number,
+    scale: number
+  ): HTMLCanvasElement | null {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) {
+      return null;
+    }
+
+    this.drawEnhanced(ctx, img, 0, sy, img.width, sourceHeight, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  }
+
+  private drawEnhanced(
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    sx: number,
+    sy: number,
+    sw: number,
+    sh: number,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number
+  ): void {
+    ctx.filter = 'grayscale(1) contrast(1.55) brightness(1.08)';
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+    ctx.filter = 'none';
+  }
+}
+
+function loadImage(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('تعذر فتح صورة الفاتورة'));
+    img.src = source;
+  });
 }

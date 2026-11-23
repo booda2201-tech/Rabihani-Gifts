@@ -19,17 +19,24 @@ export class UsedInvoicesService {
   private readonly storageKey = 'rabihani.usedInvoices.v2';
 
   findDuplicate(invoiceNumber: string | null | undefined, total?: number | null): UsedInvoiceRecord | null {
-    if (!invoiceNumber) {
-      return null;
-    }
-
     const today = formatDateTimeToSecond(new Date()).slice(0, 10);
-    return Object.values(this.read()).find((record) => (
-      isBlocking(record) && (
+    const nowMs = Date.now();
+
+    return Object.values(this.read()).find((record) => {
+      if (!isBlocking(record)) {
+        return false;
+      }
+
+      if (invoiceNumber && (
         invoicesMatch(record.invoiceNumber, invoiceNumber, record.total, total)
-        || sameAmountToday(record, total, today)
-      )
-    )) || null;
+        || driftedSameInvoiceToday(record, invoiceNumber, total, today)
+      )) {
+        return true;
+      }
+
+      // Second photo often drops the invoice number; same paid amount within 2 hours is the same paper.
+      return recentSameAmount(record, total, nowMs);
+    }) || null;
   }
 
   findDuplicateImage(imageHash: string | null | undefined): UsedInvoiceRecord | null {
@@ -152,13 +159,53 @@ function samePortoNumber(left: string, right: string): boolean {
   return longer.startsWith(shorter) && longer.length - shorter.length <= 4;
 }
 
-function sameAmountToday(record: UsedInvoiceRecord, total: number | null | undefined, today: string): boolean {
-  return total != null
-    && record.total != null
-    && Number.isFinite(total)
-    && Number.isFinite(record.total)
-    && Math.abs(record.total - total) <= 1
-    && record.uploadedAt.slice(0, 10) === today;
+function driftedSameInvoiceToday(
+  record: UsedInvoiceRecord,
+  invoiceNumber: string,
+  total: number | null | undefined,
+  today: string
+): boolean {
+  if (
+    total == null
+    || record.total == null
+    || !Number.isFinite(total)
+    || !Number.isFinite(record.total)
+    || Math.abs(record.total - total) > 1
+    || record.uploadedAt.slice(0, 10) !== today
+  ) {
+    return false;
+  }
+
+  const left = canonicalizeInvoiceNumber(record.invoiceNumber).replace(/\D/g, '');
+  const right = canonicalizeInvoiceNumber(invoiceNumber).replace(/\D/g, '');
+  if (left.length < 10 || right.length < 10) {
+    return false;
+  }
+
+  const leftCore = left.slice(0, 13);
+  const rightCore = right.slice(0, 13);
+  return left.startsWith(right.slice(0, 8))
+    || right.startsWith(left.slice(0, 8))
+    || levenshtein(leftCore, rightCore) <= 3;
+}
+
+function recentSameAmount(
+  record: UsedInvoiceRecord,
+  total: number | null | undefined,
+  nowMs: number
+): boolean {
+  if (
+    total == null
+    || record.total == null
+    || !Number.isFinite(total)
+    || !Number.isFinite(record.total)
+    || Math.abs(record.total - total) > 1
+  ) {
+    return false;
+  }
+
+  const uploadedMs = Date.parse(record.uploadedAt.replace(' ', 'T'));
+  return Number.isFinite(uploadedMs) && nowMs - uploadedMs >= 0 && nowMs - uploadedMs <= 2 * 60 * 60 * 1000;
 }
 
 function isBlocking(record: UsedInvoiceRecord | undefined): record is UsedInvoiceRecord {

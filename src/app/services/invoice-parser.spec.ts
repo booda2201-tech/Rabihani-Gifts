@@ -41,7 +41,7 @@ describe('invoice parser', () => {
     expect(result.points).toBe(10);
     expect(result.invoiceNumber).toBe('FO1907512037141732');
     expect(parseInvoiceText('رقم الفاتورة 18898120\nالمدفوع 50.00').invoiceNumber).toBeNull();
-    expect(parseInvoiceText('Invoice No. FO1907512037141\n732').invoiceNumber).toBeNull();
+    expect(parseInvoiceText('Invoice No. FO1907512037141\n732').invoiceNumber).toBe('FO1907512037141732');
     expect(result.invoiceNumberTrusted).toBeTrue();
     expect(result.amountSource).toBe('paid');
     expect(result.customerPhone).toBe('01114311146');
@@ -125,6 +125,96 @@ describe('invoice parser', () => {
 
     expect(result.invoiceNumber).toBe('KM1919921821999441');
     expect(result.invoiceNumberTrusted).toBeTrue();
+  });
+
+  it('reads the real Porto sample with the continuation on the same or next line', () => {
+    const wrapped = parseInvoiceText(`
+      PORTO محل مغسلة المحطة للسيارات
+      Invoice No.: FO1907512009978 رقم الفاتورة
+      551
+      Date 23-Oct-2026
+      Total Amount 241.230 الاجمالي
+      Tax 33.773 الضريبة
+      Net 275.003 الصافي
+      Paid 275.003 المدفوع
+    `);
+    const sameLine = parseInvoiceText(`
+      PORTO
+      Invoice No FO1907512009978551 رقم الفاتورة
+      Date 23-Oct-2026
+      Paid 275.003 المدفوع
+      Net 275.003 الصافي
+    `);
+    const spaced = parseInvoiceText(`
+      PORTO
+      Invoice No. FO1907512009978 551
+      Paid 275.003 المدفوع
+    `);
+
+    expect(wrapped.invoiceNumber).toBe('FO1907512009978551');
+    expect(wrapped.invoiceTotal).toBe(275.003);
+    expect(wrapped.points).toBe(55);
+    expect(sameLine.invoiceNumber).toBe('FO1907512009978551');
+    expect(spaced.invoiceNumber).toBe('FO1907512009978551');
+  });
+
+  it('infers paid/net from total plus tax when the paid line is missing', () => {
+    const result = parseInvoiceText(`
+      PORTO
+      Invoice No. FO1907512037141
+      732
+      Date 23-Oct-2026
+      Total Amount 175.440
+      Tax 24.562
+    `);
+
+    expect(result.net).toBe(200.002);
+    expect(result.invoiceTotal).toBe(200.002);
+    expect(result.amountSource).toBe('net');
+    expect(result.points).toBe(40);
+  });
+
+  it('recovers a noisy Forto number even when OCR breaks the lines', () => {
+    const result = parseInvoiceText(`
+      Maghsala fourto
+      Inv0ice No F0 1907 5120 37141
+      732
+      Date 23-Oct-2026
+      Paid 200.002
+      Net 200.002
+      Tax 24.562
+    `);
+
+    expect(result.invoiceNumber).toBe('FO1907512037141732');
+    expect(result.invoiceNumberTrusted).toBeTrue();
+  });
+
+  it('accepts Bubble Hope when the logo is missing and the number wraps as 12+4', () => {
+    const result = parseInvoiceText(`
+      Print Date 23-Nov-2026
+      Invoice No.: MO192841189449
+      7417
+      Date 23-Nov-2026
+      Total Amount 263.159
+      Fax 36.842
+      Vet 300.002
+      Paid 300.002
+    `);
+    const noisy = parseInvoiceText(`
+      Bobble hope
+      nvoice No MO192841189449
+      7417
+      Date 23-Nov-2026
+      Paidid 300.002
+      Netet 300.002
+    `);
+
+    expect(result.invoiceNumber).toBe('MO1928411894497417');
+    expect(result.invoiceNumberTrusted).toBeTrue();
+    expect(result.invoiceTotal).toBe(300.002);
+    expect(result.points).toBe(60);
+    expect(noisy.invoiceNumber).toBe('MO1928411894497417');
+    expect(noisy.invoiceNumberTrusted).toBeTrue();
   });
 
 });

@@ -45,10 +45,10 @@ describe('UsedInvoicesService', () => {
     expect(service.findDuplicate('ZZ99999999999999', 275.003)).toBeNull();
   });
 
-  it('rejects the same amount on the same day when the invoice number is read as a different one', () => {
+  it('rejects OCR drift on the same amount today, but allows an old different invoice with the same amount', () => {
     const uploadedAt = formatDateTimeToSecond(new Date());
     service.markUsed({
-      invoiceNumber: 'FO1907512009978',
+      invoiceNumber: 'FO1907512009978551',
       imageAddedAt: uploadedAt,
       uploadedAt,
       total: 275.003,
@@ -56,18 +56,20 @@ describe('UsedInvoicesService', () => {
       newBalance: 80
     });
 
-    expect(service.findDuplicate('KX448812009991', 275)?.invoiceNumber).toBe('FO1907512009978');
-    expect(service.findDuplicate('KX448812009991', 90)).toBeNull();
+    expect(service.findDuplicate('FO1907512009978557', 275)?.invoiceNumber).toBe('FO1907512009978551');
+    expect(service.findDuplicate(null, 275)?.invoiceNumber).toBe('FO1907512009978551');
+    expect(service.findDuplicate('KX448812009991441', 90)).toBeNull();
 
     service.markUsed({
-      invoiceNumber: 'FO1907512001111',
+      invoiceNumber: 'FO1907512001111222',
       imageAddedAt: '2026-11-01 12:00:00',
       uploadedAt: '2026-11-01 12:00:00',
       total: 80,
       points: 16,
       newBalance: 16
     });
-    expect(service.findDuplicate('QQ111111111111', 80)).toBeNull();
+    expect(service.findDuplicate('QQ111111111111999', 80)).toBeNull();
+    expect(service.findDuplicate(null, 80)).toBeNull();
   });
 
   it('treats a wrapped Porto invoice number as the same invoice even when the amount differs', () => {
