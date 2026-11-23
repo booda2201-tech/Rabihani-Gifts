@@ -42,71 +42,23 @@ export class InvoiceAiService implements OnDestroy {
     void this.getWorker().catch(() => undefined);
   }
 
-  /**
-   * Reads a normal phone photo of the whole receipt.
-   * Uses header+totals first; only retries a close header crop if the invoice number is missing.
-   */
+  /** One fast OCR pass on header + totals. No second/third retries. */
   async recognizeText(
     image: string,
     onProgress?: (progress: InvoiceProgress) => void
   ): Promise<string> {
     this.progressListener = onProgress || null;
-    onProgress?.({ status: 'جاري تجهيز صورة الفاتورة...', progress: 8 });
+    onProgress?.({ status: 'جاري تجهيز صورة الفاتورة...', progress: 10 });
 
-    const img = await loadImage(image);
-    const worker = await this.getWorker();
-    const mainPage = this.receiptCanvas(img);
-    if (!mainPage) {
-      throw new Error('تعذر تجهيز صورة الفاتورة');
-    }
+    const [page, worker] = await Promise.all([
+      this.preparePage(image),
+      this.getWorker()
+    ]);
 
-    this.recognizeFloor = 18;
-    this.recognizeSpan = 55;
-    onProgress?.({ status: 'جاري قراءة الفاتورة...', progress: 18 });
-    const main = await worker.recognize(mainPage);
-    let text = main.data?.text || '';
-    let parsed = parseInvoiceText(text);
-
-    if (!parsed.invoiceNumberTrusted) {
-      const headerPage = this.headerCanvas(img);
-      if (headerPage) {
-        this.recognizeFloor = 72;
-        this.recognizeSpan = 12;
-        onProgress?.({ status: 'جاري توضيح رقم الفاتورة...', progress: 74 });
-        text = `${text}\n${await this.recognizeWithMode(worker, headerPage, '4')}`;
-        parsed = parseInvoiceText(text);
-      }
-    }
-
-    if (parsed.amountSource !== 'paid' && parsed.amountSource !== 'net') {
-      const totalsPage = this.totalsCanvas(img);
-      if (totalsPage) {
-        this.recognizeFloor = 86;
-        this.recognizeSpan = 10;
-        onProgress?.({ status: 'جاري توضيح المدفوع...', progress: 88 });
-        text = `${text}\n${await this.recognizeWithMode(worker, totalsPage, '6')}`;
-      }
-    }
-
-    return text;
-  }
-
-  private async recognizeWithMode(
-    worker: TesseractWorker,
-    page: HTMLCanvasElement,
-    mode: string
-  ): Promise<string> {
-    try {
-      await worker.setParameters({ tessedit_pageseg_mode: mode });
-    } catch {
-      // optional
-    }
+    this.recognizeFloor = 20;
+    this.recognizeSpan = 70;
+    onProgress?.({ status: 'جاري قراءة الفاتورة...', progress: 20 });
     const { data } = await worker.recognize(page);
-    try {
-      await worker.setParameters({ tessedit_pageseg_mode: '6' });
-    } catch {
-      // optional
-    }
     return data?.text || '';
   }
 
@@ -128,6 +80,22 @@ export class InvoiceAiService implements OnDestroy {
 
   ngOnDestroy(): void {
     void this.terminateWorker();
+  }
+
+  private preparePage(image: string): Promise<HTMLCanvasElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const page = this.receiptCanvas(img);
+        if (!page) {
+          reject(new Error('تعذر تجهيز صورة الفاتورة'));
+          return;
+        }
+        resolve(page);
+      };
+      img.onerror = () => reject(new Error('تعذر فتح صورة الفاتورة'));
+      img.src = image;
+    });
   }
 
   private getWorker(): Promise<TesseractWorker> {
@@ -179,7 +147,7 @@ export class InvoiceAiService implements OnDestroy {
       await worker.setParameters({
         tessedit_pageseg_mode: '6',
         classify_enable_learning: '0',
-        user_defined_dpi: '220'
+        user_defined_dpi: '180'
       });
     } catch {
       // Reading still works if the runtime rejects optional parameters.
@@ -204,7 +172,7 @@ export class InvoiceAiService implements OnDestroy {
     if (message.status) {
       this.progressListener({
         status: 'جاري تجهيز القراءة...',
-        progress: Math.min(20, Math.round((message.progress || 0) * 20))
+        progress: Math.min(18, Math.round((message.progress || 0) * 18))
       });
     }
   }
@@ -243,17 +211,17 @@ export class InvoiceAiService implements OnDestroy {
 
   private receiptCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
     const tall = img.height > img.width * 1.25;
-    const maxWidth = 1400;
+    const maxWidth = 960;
 
     if (!tall) {
-      return this.drawBand(img, 0, img.height, Math.min(1, maxWidth / img.width, 2000 / img.height));
+      return this.drawBand(img, 0, img.height, Math.min(1, maxWidth / img.width, 1400 / img.height));
     }
 
-    // Skip the QR/footer at the very bottom; Paid/Net sit above it on Forto/Bubble paper.
-    const topHeight = Math.round(img.height * 0.4);
-    const totalsY = Math.round(img.height * 0.46);
-    const totalsHeight = Math.round(img.height * 0.4);
-    const gap = 20;
+    // Header (number/date) + totals above the QR. One canvas = one OCR pass.
+    const topHeight = Math.round(img.height * 0.36);
+    const totalsY = Math.round(img.height * 0.48);
+    const totalsHeight = Math.round(img.height * 0.34);
+    const gap = 12;
     const scale = Math.min(1, maxWidth / img.width);
     const width = Math.max(1, Math.round(img.width * scale));
     const topDraw = Math.max(1, Math.round(topHeight * scale));
@@ -282,19 +250,6 @@ export class InvoiceAiService implements OnDestroy {
       totalsDraw
     );
     return canvas;
-  }
-
-  private headerCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
-    const topHeight = Math.round(img.height * Math.min(0.5, img.height > img.width ? 0.45 : 0.55));
-    const scale = Math.min(2, 1600 / img.width);
-    return this.drawBand(img, 0, topHeight, scale);
-  }
-
-  private totalsCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
-    const y = Math.round(img.height * 0.45);
-    const height = Math.round(img.height * 0.42);
-    const scale = Math.min(2, 1600 / img.width);
-    return this.drawBand(img, y, height, scale);
   }
 
   private drawBand(
@@ -327,19 +282,8 @@ export class InvoiceAiService implements OnDestroy {
     dw: number,
     dh: number
   ): void {
-    ctx.filter = 'grayscale(1) contrast(1.55) brightness(1.08)';
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.filter = 'grayscale(1) contrast(1.5) brightness(1.06)';
     ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
     ctx.filter = 'none';
   }
-}
-
-function loadImage(source: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('تعذر فتح صورة الفاتورة'));
-    img.src = source;
-  });
 }

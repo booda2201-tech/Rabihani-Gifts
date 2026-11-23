@@ -3,8 +3,6 @@ import { ApiService } from '../../services/api.service';
 import { parseCustomerQr, type CustomerQrProfile } from '../../services/customer-qr';
 import { fingerprintImage, reviewCapture, reviewInvoiceReading } from '../../services/invoice-guard';
 import { calculateInvoicePoints, parseInvoiceText } from '../../services/invoice-parser';
-import { mergeInvoiceReading } from '../../services/invoice-merge';
-import { readReceiptQr } from '../../services/invoice-receipt-qr';
 import { InvoiceAiService, type InvoiceAnalysis } from '../../services/invoice-ai.service';
 import { formatDateTimeToSecond, UsedInvoicesService } from '../../services/used-invoices.service';
 import Swal from 'sweetalert2';
@@ -367,13 +365,11 @@ export class QrComponent implements OnDestroy {
     try {
       this.analyzeStatus = 'جاري قراءة الفاتورة...';
       this.analyzeProgress = 8;
-      const receiptQrPromise = readReceiptQr(this.invoicePreview).catch(() => null);
-      const textPromise = this.invoiceAi.recognizeText(this.invoicePreview, (progress) => {
+      const text = await this.invoiceAi.recognizeText(this.invoicePreview, (progress) => {
         this.analyzeStatus = progress.status;
         this.analyzeProgress = Math.max(12, progress.progress);
       });
-      const [receiptQr, text] = await Promise.all([receiptQrPromise, textPromise]);
-      this.analysis = mergeInvoiceReading(parseInvoiceText(text), receiptQr);
+      this.analysis = parseInvoiceText(text);
       const review = reviewInvoiceReading({
         analysis: this.analysis,
         duplicateInvoice: this.usedInvoices.findDuplicate(this.analysis.invoiceNumber, this.analysis.invoiceTotal),
