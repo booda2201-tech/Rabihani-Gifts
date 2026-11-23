@@ -51,13 +51,13 @@
       </div>
 
       <div class="invoice-actions" *ngIf="!invoicePreview && !isCapturingInvoice">
-        <p class="capture-hint">صورة واحدة للورقة كلها. مش محتاج تقرّب أكتر من كده.</p>
+        <p class="capture-hint">هتفتح كاميرا الموبايل. صوّر الفاتورة مرة واحدة والورقة ظاهرة.</p>
         <button type="button" class="btn-camera" (click)="photographInvoice()" [disabled]="isAnalyzing || isSubmitting">
           <i class="bi bi-camera-fill"></i> تصوير الفاتورة
         </button>
       </div>
 
-      <div class="scanner-section invoice-camera" *ngIf="isCapturingInvoice">
+      <div class="scanner-section invoice-camera" *ngIf="isCapturingInvoice && !phoneCameraPreferred">
         <p class="capture-hint">حط الفاتورة جوا الإطار. قرّبها لحد ما الكتابة توضح، وبعدين اضغط زرار التصوير.</p>
         <div class="video-wrapper">
           <video #invoiceVideo autoplay muted playsinline webkit-playsinline class="qr-video" (click)="focusInvoice($event)"></video>

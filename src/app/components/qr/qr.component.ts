@@ -54,6 +54,19 @@ export class QrComponent implements OnDestroy {
   }
 
   get phoneCameraPreferred(): boolean {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    const ua = navigator.userAgent || '';
+    if (/Android|iPhone|iPad|iPod|Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua)) {
+      return true;
+    }
+
+    if (navigator.maxTouchPoints > 0 && window.matchMedia('(max-width: 1024px)').matches) {
+      return true;
+    }
+
     return window.matchMedia('(pointer: coarse)').matches;
   }
 
@@ -216,6 +229,7 @@ export class QrComponent implements OnDestroy {
   }
 
   photographInvoice() {
+    // Phones always open the native camera. In-page frame is desktop only.
     if (this.phoneCameraPreferred) {
       this.openPhoneCamera();
       return;
